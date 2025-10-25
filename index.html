@@ -1,1 +1,66 @@
-67
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CommunityPins</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <div class="search-container">
+            <input type="text" id="search-input" placeholder="Search location (e.g., Paris, France)">
+            <button id="search-button">Search</button>
+            <ul id="autocomplete-results" class="autocomplete-dropdown"></ul>
+            <p id="location-status">Loading location...</p>
+        </div>
+        <div class="menu-container">
+            <div class="button-group">
+                <button id="how-to-use-button">How to Use</button>
+                <button id="about-button">About</button>
+            </div>
+        </div>
+        <div id="map"></div>
+        <div id="pin-modal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Add a Pin</h2>
+                <textarea id="note-input" placeholder="Add a note (max 100 chars)" maxlength="100"></textarea>
+                <div class="modal-actions">
+                    <button id="save-pin">Save Pin</button>
+                    <button id="cancel-pin">Cancel</button>
+                </div>
+            </div>
+        </div>
+        <div id="how-to-use-modal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>How to Use</h2>
+                <p>Click the map to add a pin with a note. Search for a location using the search bar and select "Place a pin here" to add a pin. Click the heart icon on a pin to like it. Your location is approximated on load.</p>
+                <div class="modal-actions">
+                    <button class="close-how-to-use">Close</button>
+                </div>
+            </div>
+        </div>
+        <div id="about-modal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>About</h2>
+                <p>Made by Damien Sullins for 2025 TSA Website Design competition.</p>
+                <div class="modal-actions">
+                    <button class="close-about">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Firebase SDK -->
+    <script type="module" src="https://www.gstatic.com/firebasejs/10.13.1/firebase-app-compat.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/10.13.1/firebase-auth-compat.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/10.13.1/firebase-firestore-compat.js"></script>
+    <!-- Leaflet -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="script.js" type="module"></script>
+</body>
+</html>
