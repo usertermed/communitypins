@@ -85,7 +85,7 @@ function initMap() {
     });
 }
 
-// Initialize modals
+// Initialize modals and center button
 function initModals() {
     pinModal = document.getElementById('pin-modal');
     howToUseModal = document.getElementById('how-to-use-modal');
@@ -105,6 +105,11 @@ function initModals() {
     document.querySelector('#about-modal .close').onclick = () => { aboutModal.style.display = 'none'; };
     document.querySelector('.close-about').onclick = () => { aboutModal.style.display = 'none'; };
     document.getElementById('about-button').onclick = () => { aboutModal.style.display = 'block'; };
+
+    // Center button
+    document.getElementById('center-button').onclick = async () => {
+        await getUserLocation();
+    };
 }
 
 // Debounce function to limit API calls
