@@ -436,7 +436,7 @@ function loadPins() {
                     }
                 });
             });
-        } script.js?v=5:12:13 catch (error) {
+        } catch (error) {
             console.error('Error loading pins:', error);
             showToast('Failed to load pins: ' + error.message);
         }
