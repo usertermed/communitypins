@@ -72,10 +72,10 @@ async function getUserLocation() {
 
 // Initialize Leaflet map with OpenStreetMap tiles
 function initMap() {
-    map = L.map('map').setView([currentLat || 37.7749, currentLng || -122.4194], 13);
+    map = window.L.map('map').setView([currentLat || 37.7749, currentLng || -122.4194], 13);
 
     // Add OpenStreetMap tile layer
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
@@ -127,7 +127,7 @@ function debounce(func, wait) {
 }
 
 // Custom icon for temporary search marker
-const searchIcon = L.divIcon({
+const searchIcon = window.L.divIcon({
     className: 'search-marker',
     html: '<div style="background-color: #008080; width: 20px; height: 20px; border-radius: 50%; border: 2px solid white;"></div>',
     iconSize: [20, 20],
@@ -186,7 +186,7 @@ function initSearch() {
                         }
                         const lat = parseFloat(item.lat);
                         const lon = parseFloat(item.lon);
-                        searchMarker = L.marker([lat, lon], { icon: searchIcon })
+                        searchMarker = window.L.marker([lat, lon], { icon: searchIcon })
                             .addTo(map)
                             .bindPopup(`
                                 <strong>${item.display_name}</strong><br>
@@ -246,7 +246,7 @@ async function performSearch(query) {
             }
             const parsedLat = parseFloat(lat);
             const parsedLon = parseFloat(lon);
-            searchMarker = L.marker([parsedLat, parsedLon], { icon: searchIcon })
+            searchMarker = window.L.marker([parsedLat, parsedLon], { icon: searchIcon })
                 .addTo(map)
                 .bindPopup(`
                     <strong>${display_name}</strong><br>
@@ -384,7 +384,7 @@ function loadPins() {
         if (window.markerLayer) {
             window.markerLayer.clearLayers();
         } else {
-            window.markerLayer = L.layerGroup().addTo(map);
+            window.markerLayer = window.L.layerGroup().addTo(map);
         }
 
         const promises = [];
@@ -407,7 +407,7 @@ function loadPins() {
             const pinInfos = await Promise.all(promises);
 
             pinInfos.forEach(({ pinId, data, heartCount, isHearted }) => {
-                const marker = L.marker([data.lat, data.lng]).addTo(window.markerLayer);
+                const marker = window.L.marker([data.lat, data.lng]).addTo(window.markerLayer);
                 const heartButtonHtml = `
                     <button class="heart-button" data-pin-id="${pinId}" data-hearted="${isHearted}">
                         ${isHearted ? '♥' : '♡'}
