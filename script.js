@@ -1,3 +1,8 @@
+// Import Firebase modules
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
+import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
+import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
+
 // Your Firebase config
 const firebaseConfig = {
     apiKey: "AIzaSyAlLPyuOkVH0Pf7gBOmoJ7FNVJ0YSbG9i8",
@@ -9,9 +14,10 @@ const firebaseConfig = {
     measurementId: "G-RE26HEV2VC"
 };
 
-const app = firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
 // Global variables
 let map;
@@ -27,7 +33,7 @@ let currentUserId = null; // Track anonymous user ID
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        const userCredential = await auth.signInAnonymously();
+        const userCredential = await signInAnonymously(auth);
         currentUserId = userCredential.user.uid;
         console.log('Anonymous user ID:', currentUserId);
     } catch (error) {
@@ -304,17 +310,17 @@ async function toggleHeart(pinId, currentCount, isHearted) {
 
     try {
         console.log(`Toggling heart for pin ${pinId}, user ${currentUserId}, isHearted: ${isHearted}`);
-        const heartRef = db.collection('pins').doc(pinId).collection('hearts').doc(currentUserId);
+        const heartRef = doc(collection(db, 'pins', pinId, 'hearts'), currentUserId);
         const newHeartedState = !isHearted;
         const newHeartCount = isHearted ? currentCount - 1 : currentCount + 1;
 
         if (isHearted) {
             // Remove heart
-            await heartRef.delete();
+            await deleteDoc(heartRef);
             console.log(`Heart removed for pin ${pinId} by user ${currentUserId}`);
         } else {
             // Add heart
-            await heartRef.set({
+            await setDoc(heartRef, {
                 userId: currentUserId,
                 timestamp: new Date()
             });
@@ -356,7 +362,7 @@ async function savePin() {
     if (note.length > 100) return; // Enforced by maxlength, but double-check
 
     try {
-        const pinRef = await db.collection('pins').add({
+        const pinRef = await addDoc(collection(db, 'pins'), {
             lat: selectedLatLng.lat,
             lng: selectedLatLng.lng,
             note: note || '',
@@ -373,7 +379,7 @@ async function savePin() {
 
 // Load and display pins (real-time listener)
 function loadPins() {
-    db.collection('pins').orderBy('timestamp', 'desc').onSnapshot(async (snapshot) => {
+    onSnapshot(collection(db, 'pins'), orderBy('timestamp', 'desc'), async (snapshot) => {
         // Clear existing markers (use a layer group for efficiency)
         if (window.markerLayer) {
             window.markerLayer.clearLayers();
@@ -382,11 +388,11 @@ function loadPins() {
         }
 
         const promises = [];
-        snapshot.forEach((doc) => {
-            const pinId = doc.id;
-            const data = doc.data();
+        snapshot.forEach((docSnapshot) => {
+            const pinId = docSnapshot.id;
+            const data = docSnapshot.data();
             promises.push(
-                db.collection('pins').doc(pinId).collection('hearts').get().then((heartsSnapshot) => {
+                getDocs(collection(db, 'pins', pinId, 'hearts')).then((heartsSnapshot) => {
                     const heartCount = heartsSnapshot.size;
                     const isHearted = heartsSnapshot.docs.some(d => d.id === currentUserId);
                     return { pinId, data, heartCount, isHearted };
@@ -430,7 +436,7 @@ function loadPins() {
                     }
                 });
             });
-        } catch (error) {
+        } script.js?v=5:12:13 catch (error) {
             console.error('Error loading pins:', error);
             showToast('Failed to load pins: ' + error.message);
         }
