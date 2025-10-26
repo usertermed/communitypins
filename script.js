@@ -41,12 +41,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadPins();
 });
 
-// Get user location via IP geolocation (ip-api.com - free, keyless)
+// Get user location via IP geolocation (ipapi.co - free, keyless, HTTPS)
 async function getUserLocation() {
     try {
-        const response = await fetch('http://ip-api.com/json/?fields=lat,lon,status');
+        const response = await fetch('https://ipapi.co/json/');
         const data = await response.json();
-        if (data.status === 'success') {
+        if (data && data.lat && data.lon) {  // ipapi.co returns empty object on error
             currentLat = data.lat;
             currentLng = data.lon;
             document.getElementById('location-status').textContent = `Centered on your approximate location.`;
@@ -176,12 +176,12 @@ function initSearch() {
                         const lat = parseFloat(item.lat);
                         const lon = parseFloat(item.lon);
                         searchMarker = L.marker([lat, lon], { icon: searchIcon })
-                        .addTo(map)
-                        .bindPopup(`
-                        <strong>${item.display_name}</strong><br>
-                        <button class="place-pin-button" data-lat="${lat}" data-lng="${lon}">Place a pin here</button>
-                        `)
-                        .openPopup();
+                            .addTo(map)
+                            .bindPopup(`
+                                <strong>${item.display_name}</strong><br>
+                                <button class="place-pin-button" data-lat="${lat}" data-lng="${lon}">Place a pin here</button>
+                            `)
+                            .openPopup();
                         // Add event listener for the button
                         setTimeout(() => { // Delay to ensure button is in DOM
                             const placeButton = document.querySelector('.place-pin-button');
@@ -236,12 +236,12 @@ async function performSearch(query) {
             const parsedLat = parseFloat(lat);
             const parsedLon = parseFloat(lon);
             searchMarker = L.marker([parsedLat, parsedLon], { icon: searchIcon })
-            .addTo(map)
-            .bindPopup(`
-            <strong>${display_name}</strong><br>
-            <button class="place-pin-button" data-lat="${parsedLat}" data-lng="${parsedLon}">Place a pin here</button>
-            `)
-            .openPopup();
+                .addTo(map)
+                .bindPopup(`
+                    <strong>${display_name}</strong><br>
+                    <button class="place-pin-button" data-lat="${parsedLat}" data-lng="${parsedLon}">Place a pin here</button>
+                `)
+                .openPopup();
             // Add event listener for the button
             setTimeout(() => { // Delay to ensure button is in DOM
                 const placeButton = document.querySelector('.place-pin-button');
@@ -398,15 +398,15 @@ function loadPins() {
             pinInfos.forEach(({ pinId, data, heartCount, isHearted }) => {
                 const marker = L.marker([data.lat, data.lng]).addTo(window.markerLayer);
                 const heartButtonHtml = `
-                <button class="heart-button" data-pin-id="${pinId}" data-hearted="${isHearted}">
-                ${isHearted ? '♥' : '♡'}
-                </button>
-                <span class="heart-count">(${heartCount})</span>
+                    <button class="heart-button" data-pin-id="${pinId}" data-hearted="${isHearted}">
+                        ${isHearted ? '♥' : '♡'}
+                    </button>
+                    <span class="heart-count">(${heartCount})</span>
                 `;
                 const popupContent = `
-                ${data.note ? `<strong>${data.note}</strong><br>` : ''}
-                <small>Added: ${data.timestamp.toDate().toLocaleString()}</small><br>
-                <div class="heart-section">${heartButtonHtml}</div>
+                    ${data.note ? `<strong>${data.note}</strong><br>` : ''}
+                    <small>Added: ${data.timestamp.toDate().toLocaleString()}</small><br>
+                    <div class="heart-section">${heartButtonHtml}</div>
                 `;
                 const popup = marker.bindPopup(popupContent);
                 if (isHearted) {
