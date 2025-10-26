@@ -420,4 +420,30 @@ function loadPins() {
                         heartButton.addEventListener('click', () => {
                             const currentCount = parseInt(heartButton.nextElementSibling.textContent.match(/\d+/)?.[0] || '0');
                             const isCurrentlyHearted = heartButton.dataset.hearted === 'true';
-                            toggle
+                            toggleHeart(pinId, currentCount, isCurrentlyHearted);
+                        });
+                    }
+                });
+            });
+        } catch (error) {
+            console.error('Error loading pins:', error);
+            showToast('Failed to load pins: ' + error.message);
+        }
+    }, (error) => {
+        console.error('Snapshot error:', error);
+        showToast('Failed to load pins: ' + error.message);
+    });
+}
+
+// Close modals on outside click
+window.onclick = (event) => {
+    if (event.target === pinModal) {
+        pinModal.style.display = 'none';
+    }
+    if (event.target === howToUseModal) {
+        howToUseModal.style.display = 'none';
+    }
+    if (event.target === aboutModal) {
+        aboutModal.style.display = 'none';
+    }
+};
