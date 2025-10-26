@@ -298,4 +298,126 @@ async function toggleHeart(pinId, currentCount, isHearted) {
     }
 
     try {
-        console.log(`Toggling heart for pin ${pinId}, user ${currentUserId}, isHearted
+        console.log(`Toggling heart for pin ${pinId}, user ${currentUserId}, isHearted: ${isHearted}`);
+        const heartRef = db.collection('pins').doc(pinId).collection('hearts').doc(currentUserId);
+        const newHeartedState = !isHearted;
+        const newHeartCount = isHearted ? currentCount - 1 : currentCount + 1;
+
+        if (isHearted) {
+            // Remove heart
+            await heartRef.delete();
+            console.log(`Heart removed for pin ${pinId} by user ${currentUserId}`);
+        } else {
+            // Add heart
+            await heartRef.set({
+                userId: currentUserId,
+                timestamp: new Date()
+            });
+            console.log(`Heart added for pin ${pinId} by user ${currentUserId}`);
+        }
+
+        // Update the open popup's heart button and count
+        const heartButton = document.querySelector(`[data-pin-id="${pinId}"]`);
+        if (heartButton) {
+            heartButton.textContent = newHeartedState ? '♥' : '♡';
+            heartButton.dataset.hearted = newHeartedState;
+            const heartCountElement = heartButton.nextElementSibling;
+            if (heartCountElement && heartCountElement.classList.contains('heart-count')) {
+                heartCountElement.textContent = `(${newHeartCount})`;
+            }
+            const popupElement = heartButton.closest('.leaflet-popup-content');
+            if (popupElement) {
+                const heartSection = popupElement.querySelector('.heart-section');
+                if (heartSection) {
+                    if (newHeartedState) {
+                        heartSection.classList.add('hearted');
+                    } else {
+                        heartSection.classList.remove('hearted');
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error toggling heart:', error, 'Pin ID:', pinId, 'User ID:', currentUserId);
+        showToast('Failed to toggle heart: ' + error.message);
+    }
+}
+
+// Save pin to Firestore
+async function savePin() {
+    if (!selectedLatLng) return;
+
+    const note = document.getElementById('note-input').value.trim();
+    if (note.length > 100) return; // Enforced by maxlength, but double-check
+
+    try {
+        const pinRef = await db.collection('pins').add({
+            lat: selectedLatLng.lat,
+            lng: selectedLatLng.lng,
+            note: note || '',
+            timestamp: new Date()
+        });
+        console.log('Pin saved with ID:', pinRef.id);
+        pinModal.style.display = 'none';
+        selectedLatLng = null;
+    } catch (error) {
+        console.error('Error saving pin:', error);
+        showToast('Failed to save pin: ' + error.message);
+    }
+}
+
+// Load and display pins (real-time listener)
+function loadPins() {
+    db.collection('pins').orderBy('timestamp', 'desc').onSnapshot(async (snapshot) => {
+        // Clear existing markers (use a layer group for efficiency)
+        if (window.markerLayer) {
+            window.markerLayer.clearLayers();
+        } else {
+            window.markerLayer = L.layerGroup().addTo(map);
+        }
+
+        const promises = [];
+        snapshot.forEach((doc) => {
+            const pinId = doc.id;
+            const data = doc.data();
+            promises.push(
+                db.collection('pins').doc(pinId).collection('hearts').get().then((heartsSnapshot) => {
+                    const heartCount = heartsSnapshot.size;
+                    const isHearted = heartsSnapshot.docs.some(d => d.id === currentUserId);
+                    return { pinId, data, heartCount, isHearted };
+                }).catch((error) => {
+                    console.error('Error fetching hearts for pin', pinId, ':', error);
+                    return { pinId, data, heartCount: 0, isHearted: false };
+                })
+            );
+        });
+
+        try {
+            const pinInfos = await Promise.all(promises);
+
+            pinInfos.forEach(({ pinId, data, heartCount, isHearted }) => {
+                const marker = L.marker([data.lat, data.lng]).addTo(window.markerLayer);
+                const heartButtonHtml = `
+                    <button class="heart-button" data-pin-id="${pinId}" data-hearted="${isHearted}">
+                        ${isHearted ? '♥' : '♡'}
+                    </button>
+                    <span class="heart-count">(${heartCount})</span>
+                `;
+                const popupContent = `
+                    ${data.note ? `<strong>${data.note}</strong><br>` : ''}
+                    <small>Added: ${data.timestamp.toDate().toLocaleString()}</small><br>
+                    <div class="heart-section">${heartButtonHtml}</div>
+                `;
+                const popup = marker.bindPopup(popupContent);
+                if (isHearted) {
+                    popup.getElement()?.classList.add('hearted'); // Apply hearted styles
+                }
+
+                // Delegate event listener for heart button
+                marker.on('popupopen', () => {
+                    const heartButton = document.querySelector(`[data-pin-id="${pinId}"]`);
+                    if (heartButton) {
+                        heartButton.addEventListener('click', () => {
+                            const currentCount = parseInt(heartButton.nextElementSibling.textContent.match(/\d+/)?.[0] || '0');
+                            const isCurrentlyHearted = heartButton.dataset.hearted === 'true';
+                            toggle
