@@ -1,339 +1,243 @@
-/* Reset and base styles */
 body {
     margin: 0;
-    font-family: 'Inter', Arial, sans-serif;
-    background-color: #f4f4f4;
-    color: #333;
-}
-
-#app {
-height: 100vh;
-display: flex;
-flex-direction: column;
-overflow: hidden;
-}
-
-/* Search container */
-.search-container {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    z-index: 1000;
-    background: linear-gradient(135deg, #ffffff, #e6ecef);
-    padding: 15px;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    max-width: 300px;
-    width: 90%;
-}
-
-#search-input {
-padding: 10px;
-border: 1px solid #ccc;
-border-radius: 8px;
-font-size: 16px;
-outline: none;
-transition: border-color 0.3s ease;
-}
-
-#search-input:focus {
-border-color: #008080;
-}
-
-/* Menu container */
-.menu-container {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    z-index: 1000;
-    background: linear-gradient(135deg, #ffffff, #e6ecef);
-    padding: 15px;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.button-group {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-#search-button, #how-to-use-button, #about-button {
-padding: 10px 20px;
-background-color: #008080;
-color: white;
-border: none;
-border-radius: 8px;
-cursor: pointer;
-font-size: 14px;
-font-weight: 500;
-transition: background-color 0.3s ease, transform 0.2s ease;
-}
-
-#search-button:hover, #how-to-use-button:hover, #about-button:hover {
-background-color: #006666;
-transform: translateY(-2px);
-}
-
-.autocomplete-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    width: 100%;
-    background-color: white;
-    border: 1px solid #ccc;
-    border-radius: 8px;
-    list-style: none;
-    padding: 0;
-    margin: 8px 0 0 0;
-    max-height: 200px;
-    overflow-y: auto;
-    z-index: 1001;
-    display: none;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.autocomplete-dropdown li {
-    padding: 12px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: background-color 0.2s ease;
-}
-
-.autocomplete-dropdown li:hover {
+    font-family: Arial, sans-serif;
     background-color: #f0f0f0;
 }
 
-#location-status {
-font-size: 12px;
-margin: 5px 0 0 0;
-color: #555;
-font-weight: 400;
+.container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 10px;
+    box-sizing: border-box;
 }
 
-/* Map */
 #map {
-flex: 1;
-min-height: 400px;
-z-index: 1;
+    flex: 1;
+    min-height: 300px;
+    margin-top: 10px;
 }
 
-/* Modal */
+#search-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+#search-input {
+    flex: 1;
+    padding: 12px;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+#search-button {
+    padding: 12px 20px;
+    font-size: 16px;
+    background-color: #008080;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#search-button:hover {
+    background-color: #006666;
+}
+
+#autocomplete-results {
+    position: absolute;
+    top: 60px;
+    left: 10px;
+    right: 10px;
+    background: white;
+    border: 1px solid #ccc;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+}
+
+#autocomplete-results li {
+    padding: 10px;
+    cursor: pointer;
+}
+
+#autocomplete-results li:hover {
+    background-color: #f0f0f0;
+}
+
+#menu-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+#center-button, #how-to-use-button, #about-button {
+    padding: 12px 20px;
+    font-size: 16px;
+    background-color: #008080;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    min-width: 100px;
+}
+
+#center-button:hover, #how-to-use-button:hover, #about-button:hover {
+    background-color: #006666;
+}
+
+#location-status {
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: #333;
+}
+
 .modal {
     display: none;
     position: fixed;
-    z-index: 1000;
-    left: 0;
     top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
     background-color: rgba(0, 0, 0, 0.5);
-    animation: fadeIn 0.3s ease;
+    z-index: 1000;
 }
 
 .modal-content {
     background-color: white;
     margin: 10% auto;
     padding: 20px;
-    border-radius: 12px;
-    width: 90%;
-    max-width: 400px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-    transform: translateY(-20px);
-    animation: slideIn 0.3s ease forwards;
+    border-radius: 8px;
+    max-width: 90%;
+    width: 400px;
+    max-height: 80vh;
+    overflow-y: auto;
 }
 
 .close {
-    color: #888;
+    color: #aaa;
     float: right;
-    font-size: 24px;
+    font-size: 28px;
     font-weight: bold;
     cursor: pointer;
-    transition: color 0.2s ease;
 }
 
 .close:hover {
-    color: #333;
+    color: #000;
 }
 
 .modal-content h2 {
-    margin: 0 0 15px;
-    font-size: 20px;
-    font-weight: 700;
-    color: #008080;
-}
-
-#note-input {
-width: 100%;
-height: 80px;
-margin: 10px 0;
-padding: 10px;
-border: 1px solid #ccc;
-border-radius: 8px;
-resize: vertical;
-font-size: 14px;
-outline: none;
-}
-
-#note-input:focus {
-border-color: #008080;
+    margin-top: 0;
 }
 
 .modal-content p {
+    margin: 10px 0;
+}
+
+#note-input {
+    width: 100%;
+    height: 80px;
+    margin-bottom: 10px;
+    padding: 10px;
     font-size: 14px;
-    line-height: 1.5;
-    margin: 0 0 15px;
-    color: #333;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-sizing: border-box;
 }
 
-.modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-}
-
-.modal-actions button, .close-how-to-use, .close-about {
+#save-pin, #cancel-pin, .close-how-to-use, .close-about {
     padding: 10px 20px;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
     font-size: 14px;
-    font-weight: 500;
-    transition: background-color 0.3s ease, transform 0.2s ease;
+    margin-right: 10px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
 }
 
 #save-pin, .close-how-to-use, .close-about {
-background-color: #008080;
-color: white;
+    background-color: #008080;
+    color: white;
 }
 
 #cancel-pin {
-background-color: #6c757d;
-color: white;
+    background-color: #ccc;
 }
 
 #save-pin:hover, .close-how-to-use:hover, .close-about:hover {
-background-color: #006666;
-transform: translateY(-2px);
+    background-color: #006666;
 }
 
 #cancel-pin:hover {
-background-color: #5a6268;
-transform: translateY(-2px);
-}
-
-/* Leaflet popup */
-.leaflet-popup-content-wrapper {
-    max-width: 220px;
-    border-radius: 8px;
-}
-
-.leaflet-popup-content {
-    margin: 12px;
-    font-size: 14px;
-    line-height: 1.5;
-}
-
-.place-pin-button {
-    padding: 8px 16px;
-    background-color: #008080;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 12px;
-    margin-top: 8px;
-    transition: background-color 0.3s ease;
-}
-
-.place-pin-button:hover {
-    background-color: #006666;
+    background-color: #bbb;
 }
 
 .heart-button {
     background: none;
     border: none;
-    font-size: 20px;
+    font-size: 18px;
     cursor: pointer;
-    color: #ff69b4;
-    padding: 2px 5px;
-    margin: 0 5px;
-    transition: transform 0.2s ease, color 0.2s ease;
 }
 
-.hearted .heart-button {
-    color: #e91e63;
-    transform: scale(1.1);
-}
-
-.heart-button:hover {
-    transform: scale(1.2);
-}
-
-@keyframes heart-pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.3); }
-    100% { transform: scale(1); }
-}
-
-.hearted .heart-button {
-    animation: heart-pulse 0.6s ease-in-out;
+.heart-section.hearted .heart-button {
+    color: red;
 }
 
 .heart-count {
     font-size: 14px;
-    color: #555;
-    transition: all 0.3s ease;
+    margin-left: 5px;
 }
 
-/* Animations */
-@keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes slideIn {
-    from { transform: translateY(-20px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-}
-
-/* Responsive design */
+/* Mobile-friendly styles */
 @media (max-width: 600px) {
-    .search-container {
-        top: 10px;
-        left: 10px;
-        width: calc(100% - 20px);
-        max-width: 280px;
+    .container {
+        padding: 5px;
     }
 
-    .menu-container {
-        top: 150px; /* Move below search container on mobile */
-        right: 10px;
-        width: calc(100% - 20px);
-        max-width: 280px;
-    }
-
-    .button-group {
+    #search-container {
         flex-direction: column;
-        gap: 8px;
+        gap: 5px;
     }
 
-    #search-button, #how-to-use-button, #about-button {
-    width: 100%;
+    #search-input, #search-button {
+        width: 100%;
+        font-size: 14px;
+        padding: 10px;
+    }
+
+    #menu-container {
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    #center-button, #how-to-use-button, #about-button {
+        width: 100%;
+        padding: 12px;
+        font-size: 14px;
+    }
+
+    #location-status {
+        font-size: 12px;
     }
 
     .modal-content {
-        margin: 20% auto;
+        margin: 5% auto;
         width: 90%;
+        padding: 15px;
     }
 
     #map {
-    min-height: 300px;
+        min-height: 200px;
+    }
+
+    #autocomplete-results {
+        top: 110px;
+        max-height: 150px;
     }
 }
