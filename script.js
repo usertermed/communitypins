@@ -1,9 +1,9 @@
 // Import Firebase modules
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
-import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
 import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
 
-// Your Firebase config
+// Firebase
 const firebaseConfig = {
     apiKey: "AIzaSyAlLPyuOkVH0Pf7gBOmoJ7FNVJ0YSbG9i8",
     authDomain: "communitypins-89698.firebaseapp.com",
@@ -29,17 +29,34 @@ let selectedLatLng = null;
 let debounceTimer;
 let searchMarker = null; // Track temporary search marker
 let currentUserId = null; // Track anonymous user ID
+let currentUserFirstName = null; // Track Google user first name (if available)
+let isGoogleUser = false; // whether the current signed-in user is a Google authenticated user
+let authModal = null; // modal prompting sign-in
+let pendingLatLng = null; // store attempted lat/lng when user is prompted to sign in
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
-    try {
-        const userCredential = await signInAnonymously(auth);
-        currentUserId = userCredential.user.uid;
-        console.log('Anonymous user ID:', currentUserId);
-    } catch (error) {
-        console.error('Auth error:', error);
-        showToast('Failed to authenticate. Some features may not work.');
-    }
+    // Keep UI in sync with auth state (handles Google sign-in and sign-out)
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            currentUserId = user.uid;
+            // Save first name if available
+            currentUserFirstName = user.displayName ? user.displayName.split(' ')[0] : null;
+            // Determine whether the signed-in user used Google provider
+            isGoogleUser = user.providerData && user.providerData.some(p => p.providerId === 'google.com');
+        } else {
+            currentUserId = null;
+            currentUserFirstName = null;
+            isGoogleUser = false;
+        }
+        updateAuthUI();
+        // If the user just signed in via Google and they had a pending location, open pin modal
+        if (isGoogleUser && pendingLatLng) {
+            selectedLatLng = pendingLatLng;
+            pendingLatLng = null;
+            pinModal.style.display = 'block';
+        }
+    });
     await getUserLocation();
     initMap();
     initModals();
@@ -47,26 +64,111 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadPins();
 });
 
-// Get user location via IP geolocation (ipapi.co - free, keyless, HTTPS)
-async function getUserLocation() {
-    try {
-        const response = await fetch('https://ipapi.co/json/');
-        const data = await response.json();
-        if (data && data.latitude && data.longitude) {  // Use 'latitude' and 'longitude' from ipapi.co
-            currentLat = data.latitude;
-            currentLng = data.longitude;
-            document.getElementById('location-status').textContent = `Centered on your approximate location.`;
-        } else {
-            throw new Error('Failed to get location');
-        }
-    } catch (error) {
-        console.error('Location error:', error);
-        document.getElementById('location-status').textContent = 'Using default location (San Francisco).';
-        currentLat = 37.7749;
-        currentLng = -122.4194;
+// Update auth button UI text
+function updateAuthUI() {
+    const authButton = document.getElementById('auth-button');
+    if (!authButton) return;
+    const user = auth.currentUser;
+    if (user && user.providerData && user.providerData.some(p => p.providerId === 'google.com')) {
+        const namePart = currentUserFirstName ? ` (${currentUserFirstName})` : '';
+        authButton.textContent = `Sign out${namePart}`;
+    } else {
+        authButton.textContent = 'Sign in with Google';
     }
+}
+
+// Called when user clicks the auth button
+async function handleAuthButtonClick() {
+    const user = auth.currentUser;
+    // If already signed in with Google, sign out
+    if (user && user.providerData && user.providerData.some(p => p.providerId === 'google.com')) {
+        try {
+            await signOut(auth);
+            showToast('Signed out');
+        } catch (err) {
+            console.error('Sign out error:', err);
+            showToast('Sign out failed: ' + err.message);
+        }
+        return;
+    }
+
+    // Otherwise, initiate Google sign-in
+    const provider = new GoogleAuthProvider();
+    try {
+        const result = await signInWithPopup(auth, provider);
+        // result.user contains the signed-in user; onAuthStateChanged will update UI
+        showToast(`Signed in as ${result.user.displayName || 'Google user'}`);
+    } catch (err) {
+        console.error('Google sign-in error:', err);
+        showToast('Google sign-in failed: ' + (err.message || err));
+    }
+}
+
+// Get user location (try browser geolocation first, fall back to IP geolocation)
+async function getUserLocation() {
+    // helper to wrap navigator.geolocation in a promise with timeout
+    const getBrowserLocation = (timeout = 10000) => {
+        return new Promise((resolve, reject) => {
+            if (!('geolocation' in navigator)) {
+                return reject(new Error('Geolocation not supported'));
+            }
+            let timedOut = false;
+            const timer = setTimeout(() => {
+                timedOut = true;
+                reject(new Error('Geolocation timed out'));
+            }, timeout);
+
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    if (timedOut) return;
+                    clearTimeout(timer);
+                    resolve(pos.coords);
+                },
+                (err) => {
+                    if (timedOut) return;
+                    clearTimeout(timer);
+                    reject(err);
+                },
+                { enableHighAccuracy: false, maximumAge: 0, timeout }
+            );
+        });
+    };
+
+    // try browser geolocation first
+    try {
+        const coords = await getBrowserLocation(10000);
+        currentLat = coords.latitude;
+        currentLng = coords.longitude;
+        document.getElementById('location-status').textContent = `Centered on your current location.`;
+    } catch (geoError) {
+        console.warn('Browser geolocation failed or denied:', geoError);
+
+        // fallback to IP lookup
+        try {
+            const response = await fetch('https://ipapi.co/json/');
+            const data = await response.json();
+            if (data && data.latitude && data.longitude) {
+                currentLat = data.latitude;
+                currentLng = data.longitude;
+                document.getElementById('location-status').textContent = `Centered on your approximate location.`;
+            } else {
+                throw new Error('IP geolocation returned invalid data');
+            }
+        } catch (ipError) {
+            console.error('IP geolocation error:', ipError);
+            document.getElementById('location-status').textContent = 'Using default location (San Francisco).';
+            currentLat = 37.7749;
+            currentLng = -122.4194;
+        }
+    }
+
+    // update map view if map already initialized
     if (map) {
-        map.setView([currentLat, currentLng], 13);
+        try {
+            map.setView([currentLat, currentLng], 13);
+        } catch (err) {
+            console.error('Error setting map view:', err);
+        }
     }
 }
 
@@ -81,6 +183,13 @@ function initMap() {
 
     // Click to add pin and remove search marker
     map.on('click', (e) => {
+        if (!isGoogleUser) {
+            // Prompt user to sign in and remember the attempted location
+            pendingLatLng = e.latlng;
+            if (authModal) authModal.style.display = 'block';
+            else showToast('Please sign in with Google to add pins.');
+            return;
+        }
         selectedLatLng = e.latlng;
         document.getElementById('note-input').value = '';
         pinModal.style.display = 'block';
@@ -96,6 +205,7 @@ function initModals() {
     pinModal = document.getElementById('pin-modal');
     howToUseModal = document.getElementById('how-to-use-modal');
     aboutModal = document.getElementById('about-modal');
+    authModal = document.getElementById('auth-required-modal');
 
     // Pin modal
     document.querySelector('#pin-modal .close').onclick = () => { pinModal.style.display = 'none'; };
@@ -116,6 +226,26 @@ function initModals() {
     document.getElementById('center-button').onclick = async () => {
         await getUserLocation();
     };
+
+    // Auth button (sign-in / sign-out)
+    const authButton = document.getElementById('auth-button');
+    if (authButton) {
+        authButton.addEventListener('click', handleAuthButtonClick);
+    }
+
+    // Auth-required modal buttons
+    if (authModal) {
+        const closeAuth = document.querySelector('.close-auth-required');
+        if (closeAuth) closeAuth.onclick = () => { authModal.style.display = 'none'; pendingLatLng = null; };
+        const signinBtn = document.getElementById('auth-required-signin');
+        const cancelBtn = document.getElementById('auth-required-cancel');
+        if (signinBtn) signinBtn.addEventListener('click', () => {
+            // trigger the same sign-in flow as the top-level auth button
+            handleAuthButtonClick();
+            authModal.style.display = 'none';
+        });
+        if (cancelBtn) cancelBtn.addEventListener('click', () => { authModal.style.display = 'none'; pendingLatLng = null; });
+    }
 }
 
 // Debounce function to limit API calls
@@ -197,15 +327,22 @@ function initSearch() {
                         setTimeout(() => { // Delay to ensure button is in DOM
                             const placeButton = document.querySelector('.place-pin-button');
                             if (placeButton) {
-                                placeButton.addEventListener('click', () => {
-                                    selectedLatLng = { lat, lng: lon };
-                                    document.getElementById('note-input').value = '';
-                                    pinModal.style.display = 'block';
-                                    if (searchMarker) {
-                                        map.removeLayer(searchMarker); // Remove temporary marker
-                                        searchMarker = null;
-                                    }
-                                });
+                                    placeButton.addEventListener('click', () => {
+                                        // If not signed in with Google, prompt and store pending lat/lng
+                                        if (!isGoogleUser) {
+                                            pendingLatLng = { lat, lng: lon };
+                                            if (authModal) authModal.style.display = 'block';
+                                            else showToast('Please sign in with Google to add pins.');
+                                            return;
+                                        }
+                                        selectedLatLng = { lat, lng: lon };
+                                        document.getElementById('note-input').value = '';
+                                        pinModal.style.display = 'block';
+                                        if (searchMarker) {
+                                            map.removeLayer(searchMarker); // Remove temporary marker
+                                            searchMarker = null;
+                                        }
+                                    });
                             }
                         }, 100);
                         autocompleteResults.style.display = 'none';
@@ -258,6 +395,12 @@ async function performSearch(query) {
                 const placeButton = document.querySelector('.place-pin-button');
                 if (placeButton) {
                     placeButton.addEventListener('click', () => {
+                        if (!isGoogleUser) {
+                            pendingLatLng = { lat: parsedLat, lng: parsedLon };
+                            if (authModal) authModal.style.display = 'block';
+                            else showToast('Please sign in with Google to add pins.');
+                            return;
+                        }
                         selectedLatLng = { lat: parsedLat, lng: parsedLon };
                         document.getElementById('note-input').value = '';
                         pinModal.style.display = 'block';
@@ -297,9 +440,8 @@ function showToast(message) {
 
 // Toggle heart for a pin
 async function toggleHeart(pinId, currentCount, isHearted) {
-    if (!currentUserId) {
-        console.error('No user ID available for heart toggle');
-        showToast('User not authenticated. Please refresh the page.');
+    if (!isGoogleUser) {
+        showToast('Please sign in with Google to like pins.');
         return;
     }
     if (!pinId || typeof pinId !== 'string' || pinId.trim() === '') {
@@ -357,6 +499,10 @@ async function toggleHeart(pinId, currentCount, isHearted) {
 // Save pin to Firestore
 async function savePin() {
     if (!selectedLatLng) return;
+    if (!isGoogleUser) {
+        showToast('Please sign in with Google to add pins.');
+        return;
+    }
 
     const note = document.getElementById('note-input').value.trim();
     if (note.length > 100) return; // Enforced by maxlength, but double-check
@@ -366,7 +512,9 @@ async function savePin() {
             lat: selectedLatLng.lat,
             lng: selectedLatLng.lng,
             note: note || '',
-            timestamp: new Date()
+            timestamp: new Date(),
+            createdById: currentUserId || null,
+            createdByFirstName: currentUserFirstName || null
         });
         console.log('Pin saved with ID:', pinRef.id);
         pinModal.style.display = 'none';
@@ -414,9 +562,25 @@ function loadPins() {
                     </button>
                     <span class="heart-count">(${heartCount})</span>
                 `;
+                const addedBy = data.createdByFirstName || 'Anonymous';
+                // timestamp may be a Date or Firestore Timestamp; handle both
+                let addedAt = '';
+                try {
+                    if (data.timestamp && typeof data.timestamp.toDate === 'function') {
+                        addedAt = data.timestamp.toDate().toLocaleString();
+                    } else if (data.timestamp instanceof Date) {
+                        addedAt = data.timestamp.toLocaleString();
+                    } else {
+                        addedAt = '';
+                    }
+                } catch (e) {
+                    addedAt = '';
+                }
+
                 const popupContent = `
                     ${data.note ? `<strong>${data.note}</strong><br>` : ''}
-                    <small>Added: ${data.timestamp.toDate().toLocaleString()}</small><br>
+                    ${addedAt ? `<small>Added: ${addedAt}</small><br>` : ''}
+                    <small>Added by: ${addedBy}</small><br>
                     <div class="heart-section">${heartButtonHtml}</div>
                 `;
                 const popup = marker.bindPopup(popupContent);

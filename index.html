@@ -16,6 +16,7 @@
         </div>
         <div id="menu-container">
             <button id="center-button" aria-label="Center map on your approximate location">Center</button>
+            <button id="auth-button" aria-label="Sign in with Google">Sign in with Google</button>
             <button id="how-to-use-button" aria-label="View instructions for using the app">How to Use</button>
             <button id="about-button" aria-label="View information about the app">About</button>
         </div>
@@ -52,6 +53,18 @@
             <span class="close close-about">&times;</span>
             <h2>About Community Pins</h2>
             <p>Community Pins lets you mark and share locations with notes and likes. Built for the 2025 TSA Website Design competition.</p>
+            <p>Firebase for data storage, Leaftlet for map data, ipapi.co for IP-based geolocation data.</p>
+        </div>
+    </div>
+
+    <!-- Auth required Modal (shown when user tries to place a pin while not signed in) -->
+    <div id="auth-required-modal" class="modal">
+        <div class="modal-content">
+            <span class="close close-auth-required">&times;</span>
+            <h2>Sign in required</h2>
+            <p>You need to sign in with Google to add pins. Would you like to sign in now?</p>
+            <button id="auth-required-signin">Sign in with Google</button>
+            <button id="auth-required-cancel">Cancel</button>
         </div>
     </div>
 
