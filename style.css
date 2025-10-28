@@ -38,7 +38,7 @@ body {
     background-color: #008080;
     color: white;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px; /* increased from 4px */
     cursor: pointer;
 }
 
@@ -78,13 +78,14 @@ body {
     flex-wrap: wrap;
 }
 
-#center-button, #how-to-use-button, #about-button {
+/* Auth button shares the same styling as other header buttons */
+#center-button, #auth-button, #how-to-use-button, #about-button {
     padding: 12px 20px;
     font-size: 16px;
     background-color: #008080;
     color: white;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px; /* increased from 4px */
     cursor: pointer;
     min-width: 100px;
 }
@@ -157,9 +158,31 @@ body {
     font-size: 14px;
     margin-right: 10px;
     border: none;
-    border-radius: 4px;
+    border-radius: 6px; /* increased from 4px */
     cursor: pointer;
 }
+
+/* Auth-required modal buttons: match modal action styling */
+#auth-required-signin, #auth-required-cancel {
+    padding: 10px 20px;
+    font-size: 14px;
+    margin-right: 10px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+#auth-required-signin {
+    background-color: #008080;
+    color: white;
+}
+
+#auth-required-cancel {
+    background-color: #ccc;
+}
+
+#auth-required-signin:hover { background-color: #006666; }
+#auth-required-cancel:hover { background-color: #bbb; }
 
 #save-pin, .close-how-to-use, .close-about {
     background-color: #008080;
