@@ -33,6 +33,7 @@ let currentUserFirstName = null; // Track Google user first name (if available)
 let isGoogleUser = false; // whether the current signed-in user is a Google authenticated user
 let authModal = null; // modal prompting sign-in
 let pendingLatLng = null; // store attempted lat/lng when user is prompted to sign in
+let selectedPinColor = '#008080'; // default pin color
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
@@ -54,7 +55,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (isGoogleUser && pendingLatLng) {
             selectedLatLng = pendingLatLng;
             pendingLatLng = null;
+            // ensure default color is selected in UI
+            selectedPinColor = selectedPinColor || '#008080';
+            updatePaletteSelectionUI();
             pinModal.style.display = 'block';
+            // focus note input for convenience
+            setTimeout(() => document.getElementById('note-input')?.focus(), 100);
         }
     });
     await getUserLocation();
@@ -191,7 +197,10 @@ function initMap() {
             return;
         }
         selectedLatLng = e.latlng;
+        // reset note and ensure a color is selected
         document.getElementById('note-input').value = '';
+        selectedPinColor = selectedPinColor || '#008080';
+        updatePaletteSelectionUI();
         pinModal.style.display = 'block';
         if (searchMarker) {
             map.removeLayer(searchMarker); // Remove temporary search marker
@@ -246,6 +255,46 @@ function initModals() {
         });
         if (cancelBtn) cancelBtn.addEventListener('click', () => { authModal.style.display = 'none'; pendingLatLng = null; });
     }
+    // Initialize color palette buttons
+    const paletteEl = document.getElementById('color-palette');
+    const colors = ['#008080', '#FF3B30', '#FF9500', '#FFCC00', '#34C759', '#007AFF', '#5856D6', '#8E8E93'];
+    if (paletteEl) {
+        paletteEl.innerHTML = '';
+        colors.forEach((c) => {
+            const btn = document.createElement('button');
+            btn.className = 'color-swatch';
+            btn.type = 'button';
+            btn.dataset.color = c;
+            btn.style.background = c;
+            btn.title = c;
+            btn.addEventListener('click', () => {
+                selectedPinColor = c;
+                updatePaletteSelectionUI();
+            });
+            paletteEl.appendChild(btn);
+        });
+        // initial selection
+        updatePaletteSelectionUI();
+    }
+}
+
+function updatePaletteSelectionUI() {
+    const swatches = document.querySelectorAll('.color-swatch');
+    swatches.forEach(s => {
+        if (s.dataset.color === selectedPinColor) s.classList.add('selected');
+        else s.classList.remove('selected');
+    });
+}
+
+// small helper: return a divIcon for a pin colored with the provided color
+function getPinIcon(color = '#008080') {
+    return window.L.divIcon({
+        className: 'pin-marker',
+        html: `<div style="background:${color}; width:20px; height:20px; border-radius:50%; border:2px solid white; box-shadow:0 1px 2px rgba(0,0,0,0.3);"></div>`,
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+        popupAnchor: [0, -10]
+    });
 }
 
 // Debounce function to limit API calls
@@ -327,23 +376,25 @@ function initSearch() {
                         setTimeout(() => { // Delay to ensure button is in DOM
                             const placeButton = document.querySelector('.place-pin-button');
                             if (placeButton) {
-                                    placeButton.addEventListener('click', () => {
-                                        // If not signed in with Google, prompt and store pending lat/lng
-                                        if (!isGoogleUser) {
-                                            pendingLatLng = { lat, lng: lon };
-                                            if (authModal) authModal.style.display = 'block';
-                                            else showToast('Please sign in with Google to add pins.');
-                                            return;
-                                        }
-                                        selectedLatLng = { lat, lng: lon };
-                                        document.getElementById('note-input').value = '';
-                                        pinModal.style.display = 'block';
-                                        if (searchMarker) {
-                                            map.removeLayer(searchMarker); // Remove temporary marker
-                                            searchMarker = null;
-                                        }
-                                    });
-                            }
+                                        placeButton.addEventListener('click', () => {
+                                            // If not signed in with Google, prompt and store pending lat/lng
+                                            if (!isGoogleUser) {
+                                                pendingLatLng = { lat, lng: lon };
+                                                if (authModal) authModal.style.display = 'block';
+                                                else showToast('Please sign in with Google to add pins.');
+                                                return;
+                                            }
+                                            selectedLatLng = { lat, lng: lon };
+                                            document.getElementById('note-input').value = '';
+                                            selectedPinColor = selectedPinColor || '#008080';
+                                            updatePaletteSelectionUI();
+                                            pinModal.style.display = 'block';
+                                            if (searchMarker) {
+                                                map.removeLayer(searchMarker); // Remove temporary marker
+                                                searchMarker = null;
+                                            }
+                                        });
+                                    }
                         }, 100);
                         autocompleteResults.style.display = 'none';
                         autocompleteResults.innerHTML = '';
@@ -514,7 +565,8 @@ async function savePin() {
             note: note || '',
             timestamp: new Date(),
             createdById: currentUserId || null,
-            createdByFirstName: currentUserFirstName || null
+            createdByFirstName: currentUserFirstName || null,
+            color: selectedPinColor || '#008080'
         });
         console.log('Pin saved with ID:', pinRef.id);
         pinModal.style.display = 'none';
@@ -555,7 +607,7 @@ function loadPins() {
             const pinInfos = await Promise.all(promises);
 
             pinInfos.forEach(({ pinId, data, heartCount, isHearted }) => {
-                const marker = window.L.marker([data.lat, data.lng]).addTo(window.markerLayer);
+                const marker = window.L.marker([data.lat, data.lng], { icon: getPinIcon(data.color || '#008080') }).addTo(window.markerLayer);
                 const heartButtonHtml = `
                     <button class="heart-button" data-pin-id="${pinId}" data-hearted="${isHearted}">
                         ${isHearted ? '♥' : '♡'}
@@ -584,21 +636,21 @@ function loadPins() {
                     <div class="heart-section">${heartButtonHtml}</div>
                 `;
                 const popup = marker.bindPopup(popupContent);
-                if (isHearted) {
-                    popup.getElement()?.classList.add('hearted'); // Apply hearted styles
-                }
+                        if (isHearted) {
+                            popup.getElement()?.classList.add('hearted'); // Apply hearted styles
+                        }
 
-                // Delegate event listener for heart button
-                marker.on('popupopen', () => {
-                    const heartButton = document.querySelector(`[data-pin-id="${pinId}"]`);
-                    if (heartButton) {
-                        heartButton.addEventListener('click', () => {
-                            const currentCount = parseInt(heartButton.nextElementSibling.textContent.match(/\d+/)?.[0] || '0');
-                            const isCurrentlyHearted = heartButton.dataset.hearted === 'true';
-                            toggleHeart(pinId, currentCount, isCurrentlyHearted);
+                        // Delegate event listener for heart button
+                        marker.on('popupopen', () => {
+                            const heartButton = document.querySelector(`[data-pin-id="${pinId}"]`);
+                            if (heartButton) {
+                                heartButton.addEventListener('click', () => {
+                                    const currentCount = parseInt(heartButton.nextElementSibling.textContent.match(/\d+/)?.[0] || '0');
+                                    const isCurrentlyHearted = heartButton.dataset.hearted === 'true';
+                                    toggleHeart(pinId, currentCount, isCurrentlyHearted);
+                                });
+                            }
                         });
-                    }
-                });
             });
         } catch (error) {
             console.error('Error loading pins:', error);

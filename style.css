@@ -184,6 +184,40 @@ body {
 #auth-required-signin:hover { background-color: #006666; }
 #auth-required-cancel:hover { background-color: #bbb; }
 
+/* Color palette for pin creation */
+#color-palette {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0 6px 0;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.color-swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+.color-swatch.selected {
+    border-color: #333;
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.05);
+}
+
+/* small swatch shown in popups */
+.popup-color-box {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    vertical-align: middle;
+    margin-right: 6px;
+    border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.1);
+}
+
 #save-pin, .close-how-to-use, .close-about {
     background-color: #008080;
     color: white;
