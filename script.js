@@ -173,7 +173,7 @@ async function getUserLocation() {
             if (data && data.latitude && data.longitude) {
                 currentLat = data.latitude;
                 currentLng = data.longitude;
-                document.getElementById('location-status').textContent = `Centered on your approximate location.`;
+                document.getElementById('location-status').textContent = `Browser location access denied, approximated location may not be accurate.`;
             } else {
                 throw new Error('IP geolocation returned invalid data');
             }
