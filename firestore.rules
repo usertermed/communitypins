@@ -1,0 +1,38 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /pins/{pinId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.note.size() <= 100;
+
+  // Allow a minimal reporting update: authenticated users may set the
+  // 'reported' flag and attach a reportedRefId and reportedAt timestamp.
+  // Keep the rule simple and avoid unsupported function calls.
+  allow update: if request.auth != null
+        && resource.data.reported != true
+        && request.resource.data.reported == true
+        && request.resource.data.reportedRefId is string
+        && request.resource.data.reportedAt is timestamp;
+
+  // Allow authenticated users to delete a pin (used when reporting).
+  // Note: this permits any authenticated user to delete pins; consider
+  // tightening this rule (e.g. require admin claim) if needed.
+  allow delete: if request.auth != null;
+
+      match /hearts/{userId} {
+        allow read: if true;
+        allow create, delete: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+
+    match /reported/{reportId} {
+      allow read: if true;
+      // Allow authenticated users to create reported docs. Basic validation: must reference an originalId
+  allow create: if request.auth != null
+        && request.resource.data.originalId is string
+        && (request.resource.data.reportNote is string || !request.resource.data.keys().hasAny(['reportNote']));
+      // Prevent client-side updates/deletes to reported documents
+      allow update, delete: if false;
+    }
+  }
+}
