@@ -35,6 +35,17 @@ let authModal = null; // modal prompting sign-in
 let pendingLatLng = null; // store attempted lat/lng when user is prompted to sign in
 let selectedPinColor = '#008080'; // default pin color
 
+// Validate latitude and longitude values
+function isValidLatLng(lat, lng) {
+    if (lat === null || lat === undefined || lng === null || lng === undefined) return false;
+    const nlat = Number(lat);
+    const nlng = Number(lng);
+    if (!isFinite(nlat) || !isFinite(nlng)) return false;
+    if (nlat < -90 || nlat > 90) return false;
+    if (nlng < -180 || nlng > 180) return false;
+    return true;
+}
+
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
     // Keep UI in sync with auth state (handles Google sign-in and sign-out)
@@ -53,14 +64,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateAuthUI();
         // If the user just signed in via Google and they had a pending location, open pin modal
         if (isGoogleUser && pendingLatLng) {
-            selectedLatLng = pendingLatLng;
-            pendingLatLng = null;
-            // ensure default color is selected in UI
-            selectedPinColor = selectedPinColor || '#008080';
-            updatePaletteSelectionUI();
-            pinModal.style.display = 'block';
-            // focus note input for convenience
-            setTimeout(() => document.getElementById('note-input')?.focus(), 100);
+            if (isValidLatLng(pendingLatLng.lat, pendingLatLng.lng)) {
+                selectedLatLng = pendingLatLng;
+                pendingLatLng = null;
+                // ensure default color is selected in UI
+                selectedPinColor = selectedPinColor || '#008080';
+                updatePaletteSelectionUI();
+                pinModal.style.display = 'block';
+                // focus note input for convenience
+                setTimeout(() => document.getElementById('note-input')?.focus(), 100);
+            } else {
+                // invalid pending coordinates -- drop them and inform the user
+                pendingLatLng = null;
+                showToast('Pending location is invalid and was discarded.');
+            }
         }
     });
     await getUserLocation();
@@ -189,14 +206,22 @@ function initMap() {
 
     // Click to add pin and remove search marker
     map.on('click', (e) => {
+        const lat = e?.latlng?.lat;
+        const lng = e?.latlng?.lng;
+        if (!isValidLatLng(lat, lng)) {
+            showToast('Invalid location selected.');
+            return;
+        }
+
         if (!isGoogleUser) {
             // Prompt user to sign in and remember the attempted location
-            pendingLatLng = e.latlng;
+            pendingLatLng = { lat, lng };
             if (authModal) authModal.style.display = 'block';
             else showToast('Please sign in with Google to add pins.');
             return;
         }
-        selectedLatLng = e.latlng;
+
+        selectedLatLng = { lat, lng };
         // reset note and ensure a color is selected
         document.getElementById('note-input').value = '';
         selectedPinColor = selectedPinColor || '#008080';
@@ -423,25 +448,30 @@ function initSearch() {
                         setTimeout(() => { // Delay to ensure button is in DOM
                             const placeButton = document.querySelector('.place-pin-button');
                             if (placeButton) {
-                                        placeButton.addEventListener('click', () => {
-                                            // If not signed in with Google, prompt and store pending lat/lng
-                                            if (!isGoogleUser) {
-                                                pendingLatLng = { lat, lng: lon };
-                                                if (authModal) authModal.style.display = 'block';
-                                                else showToast('Please sign in with Google to add pins.');
-                                                return;
-                                            }
-                                            selectedLatLng = { lat, lng: lon };
-                                            document.getElementById('note-input').value = '';
-                                            selectedPinColor = selectedPinColor || '#008080';
-                                            updatePaletteSelectionUI();
-                                            pinModal.style.display = 'block';
-                                            if (searchMarker) {
-                                                map.removeLayer(searchMarker); // Remove temporary marker
-                                                searchMarker = null;
-                                            }
-                                        });
+                                placeButton.addEventListener('click', () => {
+                                    // Validate coordinates
+                                    if (!isValidLatLng(lat, lon)) {
+                                        showToast('Invalid location coordinates; cannot place pin.');
+                                        return;
                                     }
+                                    // If not signed in with Google, prompt and store pending lat/lng
+                                    if (!isGoogleUser) {
+                                        pendingLatLng = { lat, lng: lon };
+                                        if (authModal) authModal.style.display = 'block';
+                                        else showToast('Please sign in with Google to add pins.');
+                                        return;
+                                    }
+                                    selectedLatLng = { lat, lng: lon };
+                                    document.getElementById('note-input').value = '';
+                                    selectedPinColor = selectedPinColor || '#008080';
+                                    updatePaletteSelectionUI();
+                                    pinModal.style.display = 'block';
+                                    if (searchMarker) {
+                                        map.removeLayer(searchMarker); // Remove temporary marker
+                                        searchMarker = null;
+                                    }
+                                });
+                            }
                         }, 100);
                         autocompleteResults.style.display = 'none';
                         autocompleteResults.innerHTML = '';
@@ -493,6 +523,11 @@ async function performSearch(query) {
                 const placeButton = document.querySelector('.place-pin-button');
                 if (placeButton) {
                     placeButton.addEventListener('click', () => {
+                        // Validate coordinates
+                        if (!isValidLatLng(parsedLat, parsedLon)) {
+                            showToast('Invalid location coordinates; cannot place pin.');
+                            return;
+                        }
                         if (!isGoogleUser) {
                             pendingLatLng = { lat: parsedLat, lng: parsedLon };
                             if (authModal) authModal.style.display = 'block';
@@ -599,6 +634,14 @@ async function savePin() {
     if (!selectedLatLng) return;
     if (!isGoogleUser) {
         showToast('Please sign in with Google to add pins.');
+        return;
+    }
+
+    // Validate coordinates again before saving
+    const slat = selectedLatLng.lat;
+    const slng = selectedLatLng.lng;
+    if (!isValidLatLng(slat, slng)) {
+        showToast('Cannot save pin: invalid coordinates.');
         return;
     }
 
