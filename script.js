@@ -531,7 +531,7 @@ async function performSearch(query) {
                         if (!isGoogleUser) {
                             pendingLatLng = { lat: parsedLat, lng: parsedLon };
                             if (authModal) authModal.style.display = 'block';
-                            else showToast('Please sign in with Google to add pins.');
+                            else showToast('Please sign in with Google to add or report pins.');
                             return;
                         }
                         selectedLatLng = { lat: parsedLat, lng: parsedLon };
