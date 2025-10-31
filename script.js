@@ -1,7 +1,7 @@
 // Import Firebase modules
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
-import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
+import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc, collectionGroup } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
 
 // Firebase
 const firebaseConfig = {
@@ -585,7 +585,7 @@ async function toggleHeart(pinId, currentCount, isHearted) {
 
     try {
         console.log(`Toggling heart for pin ${pinId}, user ${currentUserId}, isHearted: ${isHearted}`);
-        const heartRef = doc(collection(db, 'pins', pinId, 'hearts'), currentUserId);
+    const heartRef = doc(collection(db, 'pins', pinId, 'hearts'), currentUserId);
         const newHeartedState = !isHearted;
         const newHeartCount = isHearted ? currentCount - 1 : currentCount + 1;
 
@@ -603,29 +603,79 @@ async function toggleHeart(pinId, currentCount, isHearted) {
         }
 
         // Update the open popup's heart button and count
-        const heartButton = document.querySelector(`[data-pin-id="${pinId}"]`);
+        // Update UI elements specifically by selector to avoid collisions with dislike buttons
+        const heartButton = document.querySelector(`.heart-button[data-pin-id="${pinId}"]`);
         if (heartButton) {
             heartButton.textContent = newHeartedState ? '♥' : '♡';
             heartButton.dataset.hearted = newHeartedState;
-            const heartCountElement = heartButton.nextElementSibling;
-            if (heartCountElement && heartCountElement.classList.contains('heart-count')) {
-                heartCountElement.textContent = `(${newHeartCount})`;
-            }
+            const heartCountElement = document.querySelector(`.heart-count[data-pin-id="${pinId}"]`);
+            if (heartCountElement) heartCountElement.textContent = `(${newHeartCount})`;
             const popupElement = heartButton.closest('.leaflet-popup-content');
             if (popupElement) {
                 const heartSection = popupElement.querySelector('.heart-section');
                 if (heartSection) {
-                    if (newHeartedState) {
-                        heartSection.classList.add('hearted');
-                    } else {
-                        heartSection.classList.remove('hearted');
-                    }
+                    if (newHeartedState) heartSection.classList.add('hearted');
+                    else heartSection.classList.remove('hearted');
                 }
             }
         }
     } catch (error) {
         console.error('Error toggling heart:', error, 'Pin ID:', pinId, 'User ID:', currentUserId);
         showToast('Failed to toggle heart: ' + error.message);
+    }
+}
+
+// Toggle dislike for a pin (mirrors heart logic)
+async function toggleDislike(pinId, currentCount, isDisliked) {
+    if (!isGoogleUser) {
+        showToast('Please sign in with Google to dislike pins.');
+        return;
+    }
+    if (!pinId || typeof pinId !== 'string' || pinId.trim() === '') {
+        console.error('Invalid pinId for dislike:', pinId);
+        showToast('Invalid pin ID. Cannot toggle dislike.');
+        return;
+    }
+
+    try {
+        console.log(`Toggling dislike for pin ${pinId}, user ${currentUserId}, isDisliked: ${isDisliked}`);
+        const dislikeRef = doc(collection(db, 'pins', pinId, 'dislikes'), currentUserId);
+        const newDislikedState = !isDisliked;
+        const newDislikeCount = isDisliked ? currentCount - 1 : currentCount + 1;
+
+        if (isDisliked) {
+            // Remove dislike
+            await deleteDoc(dislikeRef);
+            console.log(`Dislike removed for pin ${pinId} by user ${currentUserId}`);
+        } else {
+            // Add dislike
+            await setDoc(dislikeRef, {
+                userId: currentUserId,
+                timestamp: new Date()
+            });
+            console.log(`Dislike added for pin ${pinId} by user ${currentUserId}`);
+        }
+
+        // Update UI
+        const dislikeButton = document.querySelector(`.dislike-button[data-pin-id="${pinId}"]`);
+        if (dislikeButton) {
+            dislikeButton.textContent = newDislikedState ? '👎' : '👎'; // keep same glyph but toggle a data attribute
+            dislikeButton.dataset.disliked = newDislikedState;
+            dislikeButton.setAttribute('aria-pressed', newDislikedState ? 'true' : 'false');
+            const dislikeCountElement = document.querySelector(`.dislike-count[data-pin-id="${pinId}"]`);
+            if (dislikeCountElement) dislikeCountElement.textContent = `(${newDislikeCount})`;
+            const popupElement = dislikeButton.closest('.leaflet-popup-content');
+            if (popupElement) {
+                const dislikeSection = popupElement.querySelector('.heart-section');
+                if (dislikeSection) {
+                    if (newDislikedState) dislikeSection.classList.add('disliked');
+                    else dislikeSection.classList.remove('disliked');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error toggling dislike:', error, 'Pin ID:', pinId, 'User ID:', currentUserId);
+        showToast('Failed to toggle dislike: ' + error.message);
     }
 }
 
@@ -683,15 +733,17 @@ function loadPins() {
             }
 
             // Render normal pins (skip those marked reported)
-            window._pinsCache.forEach(({ pinId, data, heartCount, isHearted }) => {
+            window._pinsCache.forEach(({ pinId, data, heartCount, isHearted, dislikeCount, isDisliked }) => {
                 if (data.reported) return; // skip reported ones
                 const marker = window.L.marker([data.lat, data.lng], { icon: getPinIcon(data.color || '#008080') }).addTo(window.markerLayer);
                 const heartButtonHtml = `
                     <button class="heart-button" data-pin-id="${pinId}" data-hearted="${isHearted}">
                         ${isHearted ? '♥' : '♡'}
                     </button>
-                    <span class="heart-count">(${heartCount})</span>
-                    <button class="report-button" data-pin-id="${pinId}" style="margin-left:8px;">Report</button>
+                    <span class="heart-count" data-pin-id="${pinId}">(${heartCount})</span>
+                    <button class="dislike-button" data-pin-id="${pinId}" data-disliked="${isDisliked}" aria-pressed="${isDisliked ? 'true' : 'false'}">👎</button>
+                    <span class="dislike-count" data-pin-id="${pinId}">(${dislikeCount})</span>
+                    <button class="report-button" data-pin-id="${pinId}">Report</button>
                 `;
                 const addedBy = data.createdByFirstName || 'Anonymous';
                 let addedAt = '';
@@ -712,23 +764,89 @@ function loadPins() {
                 if (isHearted) popup.getElement()?.classList.add('hearted');
 
                 marker.on('popupopen', () => {
-                    const heartButton = document.querySelector(`[data-pin-id="${pinId}"]`);
-                    if (heartButton) {
-                        heartButton.addEventListener('click', () => {
-                            const currentCount = parseInt(heartButton.nextElementSibling.textContent.match(/\d+/)?.[0] || '0');
-                            const isCurrentlyHearted = heartButton.dataset.hearted === 'true';
-                            toggleHeart(pinId, currentCount, isCurrentlyHearted);
-                        });
+                    // Declare popupEl in the outer scope so we can attach multiple
+                    // handlers and reliably remove them in 'popupclose'.
+                    let popupEl = null;
+                    try {
+                        popupEl = marker.getPopup()?.getElement?.();
+                        if (popupEl) {
+                            // Standard Leaflet helper
+                            if (window.L && window.L.DomEvent && typeof window.L.DomEvent.disableClickPropagation === 'function') {
+                                window.L.DomEvent.disableClickPropagation(popupEl);
+                            }
+
+                            // Also defensively stop pointer/mousedown/touchstart so popup
+                            // doesn't close before click handlers run (some browsers fire
+                            // map events on mousedown/focus sequences).
+                            const stop = (ev) => { try { ev.stopPropagation(); } catch(e){} };
+                            const events = ['pointerdown', 'mousedown', 'touchstart'];
+                            popupEl.__reactionStopHandlers = popupEl.__reactionStopHandlers || [];
+                            events.forEach((evName) => {
+                                popupEl.addEventListener(evName, stop, { passive: false });
+                                popupEl.__reactionStopHandlers.push({ evName, fn: stop });
+                            });
+
+                            // Cleanup once popup closes (for the pointer handlers)
+                            marker.once('popupclose', () => {
+                                try {
+                                    (popupEl.__reactionStopHandlers || []).forEach(h => popupEl.removeEventListener(h.evName, h.fn));
+                                } catch (e) { /* ignore */ }
+                                popupEl.__reactionStopHandlers = null;
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('Could not disable popup click propagation:', e);
                     }
-                    const reportButton = document.querySelector(`.report-button[data-pin-id="${pinId}"]`);
-                    if (reportButton) {
-                        reportButton.addEventListener('click', async () => {
-                            if (data.reported) { showToast('Report submitted.'); return; }
-                            if (!isGoogleUser) { if (authModal) authModal.style.display = 'block'; else showToast('Please sign in with Google to report pins.'); return; }
-                            const note = window.prompt('Optional: add a short reason for reporting (press Cancel to skip)');
-                            try { reportButton.disabled = true; await reportPin(pinId, data, note || ''); showToast('Pin reported.'); }
-                            catch (err) { console.error('Report failed:', err); if (err && err.code && err.code.includes('permission')) { showToast('Reported — pending review (insufficient permissions to remove).'); } else { showToast('Failed to report pin: ' + (err.message || err)); } }
-                            finally { reportButton.disabled = false; }
+
+                    // Unified delegated handler for reaction and report buttons.
+                    // Attach to the popup element so clicks are handled before they
+                    // reach the map and unintentionally close the popup.
+                    const popupClickHandler = async (e) => {
+                        try {
+                            const heartBtn = e.target.closest && e.target.closest('.heart-button');
+                            if (heartBtn) {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                const pid = heartBtn.dataset.pinId;
+                                const currentCount = parseInt(document.querySelector(`.heart-count[data-pin-id="${pid}"]`).textContent.match(/\d+/)?.[0] || '0');
+                                const isCurrentlyHearted = heartBtn.dataset.hearted === 'true';
+                                toggleHeart(pid, currentCount, isCurrentlyHearted);
+                                return;
+                            }
+
+                            const dislikeBtn = e.target.closest && e.target.closest('.dislike-button');
+                            if (dislikeBtn) {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                const pid = dislikeBtn.dataset.pinId;
+                                const currentCount = parseInt(document.querySelector(`.dislike-count[data-pin-id="${pid}"]`).textContent.match(/\d+/)?.[0] || '0');
+                                const isCurrentlyDisliked = dislikeBtn.dataset.disliked === 'true';
+                                toggleDislike(pid, currentCount, isCurrentlyDisliked);
+                                return;
+                            }
+
+                            const reportBtn = e.target.closest && e.target.closest('.report-button');
+                            if (reportBtn) {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                if (data.reported) { showToast('Report submitted.'); return; }
+                                if (!isGoogleUser) { if (authModal) authModal.style.display = 'block'; else showToast('Please sign in with Google to report pins.'); return; }
+                                const note = window.prompt('Optional: add a short reason for reporting (press Cancel to skip)');
+                                try { reportBtn.disabled = true; await reportPin(pinId, data, note || ''); showToast('Pin reported.'); }
+                                catch (err) { console.error('Report failed:', err); if (err && err.code && err.code.includes('permission')) { showToast('Reported — pending review (insufficient permissions to remove).'); } else { showToast('Failed to report pin: ' + (err.message || err)); } }
+                                finally { reportBtn.disabled = false; }
+                                return;
+                            }
+                        } catch (err) {
+                            console.error('Popup click handler error:', err);
+                        }
+                    };
+
+                    // Ensure we attach once per popup and remove on close
+                    if (popupEl) {
+                        popupEl.addEventListener('click', popupClickHandler);
+                        marker.once('popupclose', () => {
+                            try { popupEl.removeEventListener('click', popupClickHandler); } catch (e) { /* ignore */ }
                         });
                     }
                 });
@@ -737,10 +855,15 @@ function loadPins() {
             // Render reported docs (show them identical to normal pins)
             window._reportedCache.forEach(({ reportId, data }) => {
                 const marker = window.L.marker([data.lat, data.lng], { icon: getPinIcon(data.color || '#008080') }).addTo(window.markerLayer);
+                // For reported docs we render reaction buttons but disable them to avoid
+                // attempting writes to /pins/{reportId}/... which would be incorrect and
+                // cause permission errors. Reactions on reported items are read-only here.
                 const heartButtonHtml = `
-                    <button class="heart-button" data-pin-id="${reportId}" data-hearted="false">♡</button>
-                    <span class="heart-count">(0)</span>
-                    <button class="report-button" data-pin-id="${reportId}" style="margin-left:8px;">Report</button>
+                    <button class="heart-button disabled-reaction" data-pin-id="${reportId}" data-hearted="false" disabled aria-disabled="true" title="Reactions disabled on reported pins">♡</button>
+                    <span class="heart-count" data-pin-id="${reportId}">(0)</span>
+                    <button class="dislike-button disabled-reaction" data-pin-id="${reportId}" data-disliked="false" aria-pressed="false" disabled aria-disabled="true" title="Reactions disabled on reported pins">👎</button>
+                    <span class="dislike-count" data-pin-id="${reportId}">(0)</span>
+                    <button class="report-button" data-pin-id="${reportId}">Report</button>
                 `;
                 const addedBy = data.createdByFirstName || 'Anonymous';
                 let addedAt = '';
@@ -760,19 +883,35 @@ function loadPins() {
                 marker.bindPopup(popupContent);
 
                 marker.on('popupopen', () => {
+                    try {
+                        const popupEl = marker.getPopup()?.getElement?.();
+                        if (popupEl) {
+                            if (window.L && window.L.DomEvent && typeof window.L.DomEvent.disableClickPropagation === 'function') {
+                                window.L.DomEvent.disableClickPropagation(popupEl);
+                            }
+                            const stop = (ev) => { try { ev.stopPropagation(); } catch(e){} };
+                            const events = ['pointerdown', 'mousedown', 'touchstart'];
+                            popupEl.__reactionStopHandlers = popupEl.__reactionStopHandlers || [];
+                            events.forEach((evName) => {
+                                popupEl.addEventListener(evName, stop, { passive: false });
+                                popupEl.__reactionStopHandlers.push({ evName, fn: stop });
+                            });
+                            marker.once('popupclose', () => {
+                                try {
+                                    (popupEl.__reactionStopHandlers || []).forEach(h => popupEl.removeEventListener(h.evName, h.fn));
+                                } catch (e) { /* ignore */ }
+                                popupEl.__reactionStopHandlers = null;
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('Could not disable popup click propagation for reported item:', e);
+                    }
                     const reportButton = document.querySelector(`.report-button[data-pin-id="${reportId}"]`);
                     if (reportButton) {
                         // Reported doc: clicking report should appear successful but do nothing
-                        reportButton.addEventListener('click', () => { showToast('Report submitted.'); });
+                        reportButton.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); showToast('Report submitted.'); });
                     }
-                    const heartButton = document.querySelector(`[data-pin-id="${reportId}"]`);
-                    if (heartButton) {
-                        heartButton.addEventListener('click', () => {
-                            const currentCount = parseInt(heartButton.nextElementSibling.textContent.match(/\d+/)?.[0] || '0');
-                            const isCurrentlyHearted = heartButton.dataset.hearted === 'true';
-                            toggleHeart(reportId, currentCount, isCurrentlyHearted);
-                        });
-                    }
+                    // Reactions are disabled for reported items to avoid permission errors.
                 });
             });
         }
@@ -783,15 +922,36 @@ function loadPins() {
             snapshot.forEach((docSnapshot) => {
                 const pinId = docSnapshot.id;
                 const data = docSnapshot.data();
-                promises.push(
-                    getDocs(collection(db, 'pins', pinId, 'hearts')).then((heartsSnapshot) => {
-                        const heartCount = heartsSnapshot.size;
-                        const isHearted = heartsSnapshot.docs.some(d => d.id === currentUserId);
-                        return { pinId, data, heartCount, isHearted };
-                    }).catch((error) => {
+                // Fetch both hearts and dislikes counts and whether current user has acted
+                const heartsPromise = getDocs(collection(db, 'pins', pinId, 'hearts'))
+                    .then((heartsSnapshot) => ({
+                        heartCount: heartsSnapshot.size,
+                        isHearted: heartsSnapshot.docs.some(d => d.id === currentUserId)
+                    }))
+                    .catch((error) => {
                         console.error('Error fetching hearts for pin', pinId, ':', error);
-                        return { pinId, data, heartCount: 0, isHearted: false };
-                    })
+                        return { heartCount: 0, isHearted: false };
+                    });
+
+                const dislikesPromise = getDocs(collection(db, 'pins', pinId, 'dislikes'))
+                    .then((dislikesSnapshot) => ({
+                        dislikeCount: dislikesSnapshot.size,
+                        isDisliked: dislikesSnapshot.docs.some(d => d.id === currentUserId)
+                    }))
+                    .catch((error) => {
+                        console.error('Error fetching dislikes for pin', pinId, ':', error);
+                        return { dislikeCount: 0, isDisliked: false };
+                    });
+
+                promises.push(
+                    Promise.all([heartsPromise, dislikesPromise]).then(([h, d]) => ({
+                        pinId,
+                        data,
+                        heartCount: h.heartCount,
+                        isHearted: h.isHearted,
+                        dislikeCount: d.dislikeCount,
+                        isDisliked: d.isDisliked
+                    }))
                 );
             });
 
@@ -819,6 +979,85 @@ function loadPins() {
         }, (error) => {
             console.error('Reported snapshot error:', error);
         });
+
+        // Listen for changes to any dislike documents across the database so counts
+        // update in near real-time without requiring a full page refresh.
+        // We use collectionGroup('dislikes') to watch all dislikes under pins/{pinId}/dislikes.
+        try {
+            onSnapshot(collectionGroup(db, 'dislikes'), (snap) => {
+                // Build a map of pinId => { count, isDislikedForCurrentUser }
+                const counts = {}; // pinId -> { count, isDisliked }
+                snap.forEach((d) => {
+                    // parent of the dislike doc is the dislikes collection; its parent is the pin doc
+                    const parent = d.ref.parent; // dislikes collection
+                    const pinRef = parent.parent; // pins/{pinId}
+                    if (!pinRef) return;
+                    const pinId = pinRef.id;
+                    if (!counts[pinId]) counts[pinId] = { count: 0, isDisliked: false };
+                    counts[pinId].count += 1;
+                    if (d.id === currentUserId) counts[pinId].isDisliked = true;
+                });
+
+                // Merge counts into the pins cache
+                if (Array.isArray(window._pinsCache)) {
+                    window._pinsCache = window._pinsCache.map((p) => {
+                        const c = counts[p.pinId];
+                        if (c) {
+                            return { ...p, dislikeCount: c.count, isDisliked: c.isDisliked };
+                        }
+                        // no dislikes for this pin
+                        return { ...p, dislikeCount: 0, isDisliked: false };
+                    });
+                }
+                renderAllMarkers();
+            }, (err) => {
+                console.error('Dislikes collectionGroup snapshot error:', err);
+                // If this is a permissions error, fall back to polling per-pin dislikes
+                if (err && err.code && err.code.includes('permission')) {
+                    showToast('Real-time dislikes unavailable due to Firestore permissions — falling back to periodic refresh.');
+                    startDislikesPolling();
+                }
+            });
+        } catch (err) {
+            console.warn('Could not attach dislikes collectionGroup listener:', err);
+            // Fall back to polling if collectionGroup attachment fails synchronously
+            startDislikesPolling();
+        }
+
+        // Polling fallback state
+        let _dislikesPollHandle = null;
+        function startDislikesPolling() {
+            if (_dislikesPollHandle) return; // already polling
+            // immediate fetch once
+            fetchAllDislikeCountsForPins().catch(e => console.warn('Initial dislike fetch failed:', e));
+            _dislikesPollHandle = setInterval(() => {
+                fetchAllDislikeCountsForPins().catch(e => console.warn('Periodic dislike fetch failed:', e));
+            }, 15000);
+        }
+
+        async function fetchAllDislikeCountsForPins() {
+            if (!Array.isArray(window._pinsCache) || window._pinsCache.length === 0) return;
+            const promises = window._pinsCache.map(async (p) => {
+                try {
+                    const snap = await getDocs(collection(db, 'pins', p.pinId, 'dislikes'));
+                    const count = snap.size;
+                    const isDisliked = snap.docs.some(d => d.id === currentUserId);
+                    return { pinId: p.pinId, count, isDisliked };
+                } catch (err) {
+                    console.warn('Error fetching dislikes for pin', p.pinId, err);
+                    return { pinId: p.pinId, count: p.dislikeCount || 0, isDisliked: p.isDisliked || false };
+                }
+            });
+            const results = await Promise.all(promises);
+            const map = {};
+            results.forEach(r => { map[r.pinId] = r; });
+            window._pinsCache = window._pinsCache.map((p) => {
+                const r = map[p.pinId];
+                if (r) return { ...p, dislikeCount: r.count, isDisliked: r.isDisliked };
+                return { ...p, dislikeCount: 0, isDisliked: false };
+            });
+            renderAllMarkers();
+        }
 }
 
 // Close modals on outside click

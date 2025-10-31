@@ -242,13 +242,66 @@ body {
     cursor: pointer;
 }
 
+/* Reaction layout: keep heart and dislike buttons aligned and compact */
+.heart-section {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .heart-section.hearted .heart-button {
     color: red;
 }
 
 .heart-count {
     font-size: 14px;
-    margin-left: 5px;
+    margin-left: 4px;
+    margin-right: 2px;
+}
+
+.dislike-button {
+    background: none;
+    border: none;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 2px;
+    line-height: 1;
+}
+
+.dislike-button[data-disliked="true"] {
+    color: #c62828; /* red-ish when active */
+}
+
+.dislike-count {
+    font-size: 14px;
+    margin-left: 2px;
+    margin-right: 4px;
+    color: #333;
+}
+
+/* Stronger active styling for dislike: make it visually distinct when pressed */
+.dislike-button[data-disliked="true"] {
+    background-color: #c62828; /* active red background */
+    color: #fff; /* white glyph on red */
+    padding: 4px 6px;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(198,40,40,0.25);
+    transform: translateY(-1px);
+}
+
+.dislike-button {
+    transition: background-color 120ms ease, color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.dislike-button:focus {
+    outline: 3px solid rgba(0,128,128,0.15);
+    outline-offset: 2px;
+}
+
+/* Disabled reaction buttons (used for reported items) */
+.disabled-reaction {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 /* Mobile-friendly styles */

@@ -23,6 +23,10 @@ service cloud.firestore {
         allow read: if true;
         allow create, delete: if request.auth != null && request.auth.uid == userId;
       }
+      match /dislikes/{userId} {
+        allow read: if true;
+        allow create, delete: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     match /reported/{reportId} {
@@ -33,6 +37,16 @@ service cloud.firestore {
         && (request.resource.data.reportNote is string || !request.resource.data.keys().hasAny(['reportNote']));
       // Prevent client-side updates/deletes to reported documents
       allow update, delete: if false;
+    }
+    
+    // Generic rules for any 'dislikes' subcollection anywhere in the database.
+    // This lets collectionGroup queries on 'dislikes' succeed even if dislikes
+    // exist under other parent collections (for example if migrated or if
+    // reported items later get a dislikes subcollection). Keeps the same
+    // per-user create/delete restriction as the more specific rule above.
+    match /{path=**}/dislikes/{userId} {
+      allow read: if true;
+      allow create, delete: if request.auth != null && request.auth.uid == userId;
     }
   }
 }
