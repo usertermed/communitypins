@@ -444,35 +444,48 @@ function initSearch() {
                                 <button class="place-pin-button" data-lat="${lat}" data-lng="${lon}">Place a pin here</button>
                             `)
                             .openPopup();
-                        // Add event listener for the button
-                        setTimeout(() => { // Delay to ensure button is in DOM
-                            const placeButton = document.querySelector('.place-pin-button');
-                            if (placeButton) {
-                                placeButton.addEventListener('click', () => {
-                                    // Validate coordinates
-                                    if (!isValidLatLng(lat, lon)) {
-                                        showToast('Invalid location coordinates; cannot place pin.');
-                                        return;
+                        // Attach handler when popup opens so we operate on the popup DOM
+                        searchMarker.on('popupopen', () => {
+                            try {
+                                const popupEl = searchMarker.getPopup().getElement();
+                                if (popupEl) {
+                                    // Make sure clicks inside the popup don't propagate to the map
+                                    if (window.L && window.L.DomEvent && typeof window.L.DomEvent.disableClickPropagation === 'function') {
+                                        window.L.DomEvent.disableClickPropagation(popupEl);
                                     }
-                                    // If not signed in with Google, prompt and store pending lat/lng
-                                    if (!isGoogleUser) {
-                                        pendingLatLng = { lat, lng: lon };
-                                        if (authModal) authModal.style.display = 'block';
-                                        else showToast('Please sign in with Google to add pins.');
-                                        return;
+                                    const placeButton = popupEl.querySelector('.place-pin-button');
+                                    if (placeButton) {
+                                        placeButton.addEventListener('click', (ev) => {
+                                            ev.stopPropagation();
+                                            ev.preventDefault();
+                                            // Validate coordinates
+                                            if (!isValidLatLng(lat, lon)) {
+                                                showToast('Invalid location coordinates; cannot place pin.');
+                                                return;
+                                            }
+                                            // If not signed in with Google, prompt and store pending lat/lng
+                                            if (!isGoogleUser) {
+                                                pendingLatLng = { lat, lng: lon };
+                                                if (authModal) authModal.style.display = 'block';
+                                                else showToast('Please sign in with Google to add pins.');
+                                                return;
+                                            }
+                                            selectedLatLng = { lat, lng: lon };
+                                            document.getElementById('note-input').value = '';
+                                            selectedPinColor = selectedPinColor || '#008080';
+                                            updatePaletteSelectionUI();
+                                            pinModal.style.display = 'block';
+                                            if (searchMarker) {
+                                                map.removeLayer(searchMarker); // Remove temporary marker
+                                                searchMarker = null;
+                                            }
+                                        });
                                     }
-                                    selectedLatLng = { lat, lng: lon };
-                                    document.getElementById('note-input').value = '';
-                                    selectedPinColor = selectedPinColor || '#008080';
-                                    updatePaletteSelectionUI();
-                                    pinModal.style.display = 'block';
-                                    if (searchMarker) {
-                                        map.removeLayer(searchMarker); // Remove temporary marker
-                                        searchMarker = null;
-                                    }
-                                });
+                                }
+                            } catch (e) {
+                                console.error('Error attaching place-pin handler (autocomplete):', e);
                             }
-                        }, 100);
+                        });
                         autocompleteResults.style.display = 'none';
                         autocompleteResults.innerHTML = '';
                     });
@@ -518,32 +531,45 @@ async function performSearch(query) {
                     <button class="place-pin-button" data-lat="${parsedLat}" data-lng="${parsedLon}">Place a pin here</button>
                 `)
                 .openPopup();
-            // Add event listener for the button
-            setTimeout(() => { // Delay to ensure button is in DOM
-                const placeButton = document.querySelector('.place-pin-button');
-                if (placeButton) {
-                    placeButton.addEventListener('click', () => {
-                        // Validate coordinates
-                        if (!isValidLatLng(parsedLat, parsedLon)) {
-                            showToast('Invalid location coordinates; cannot place pin.');
-                            return;
+            // Attach handler on popup open and disable click propagation so the
+            // button click is reliably handled (avoids popup closing before handler runs).
+            searchMarker.on('popupopen', () => {
+                try {
+                    const popupEl = searchMarker.getPopup().getElement();
+                    if (popupEl) {
+                        if (window.L && window.L.DomEvent && typeof window.L.DomEvent.disableClickPropagation === 'function') {
+                            window.L.DomEvent.disableClickPropagation(popupEl);
                         }
-                        if (!isGoogleUser) {
-                            pendingLatLng = { lat: parsedLat, lng: parsedLon };
-                            if (authModal) authModal.style.display = 'block';
-                            else showToast('Please sign in with Google to add or report pins.');
-                            return;
+                        const placeButton = popupEl.querySelector('.place-pin-button');
+                        if (placeButton) {
+                            placeButton.addEventListener('click', (ev) => {
+                                ev.stopPropagation();
+                                ev.preventDefault();
+                                // Validate coordinates
+                                if (!isValidLatLng(parsedLat, parsedLon)) {
+                                    showToast('Invalid location coordinates; cannot place pin.');
+                                    return;
+                                }
+                                if (!isGoogleUser) {
+                                    pendingLatLng = { lat: parsedLat, lng: parsedLon };
+                                    if (authModal) authModal.style.display = 'block';
+                                    else showToast('Please sign in with Google to add or report pins.');
+                                    return;
+                                }
+                                selectedLatLng = { lat: parsedLat, lng: parsedLon };
+                                document.getElementById('note-input').value = '';
+                                pinModal.style.display = 'block';
+                                if (searchMarker) {
+                                    map.removeLayer(searchMarker); // Remove temporary marker
+                                    searchMarker = null;
+                                }
+                            });
                         }
-                        selectedLatLng = { lat: parsedLat, lng: parsedLon };
-                        document.getElementById('note-input').value = '';
-                        pinModal.style.display = 'block';
-                        if (searchMarker) {
-                            map.removeLayer(searchMarker); // Remove temporary marker
-                            searchMarker = null;
-                        }
-                    });
+                    }
+                } catch (e) {
+                    console.error('Error attaching place-pin handler (search):', e);
                 }
-            }, 100);
+            });
         } else {
             showToast('Location not found. Try a different query.');
         }
