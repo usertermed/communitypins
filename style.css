@@ -79,7 +79,7 @@ body {
 }
 
 /* Auth button shares the same styling as other header buttons */
-#center-button, #auth-button, #how-to-use-button, #about-button {
+#center-button, #auth-button, #my-maps-button, #how-to-use-button, #about-button {
     padding: 12px 20px;
     font-size: 16px;
     background-color: #008080;
@@ -90,7 +90,7 @@ body {
     min-width: 100px;
 }
 
-#center-button:hover, #how-to-use-button:hover, #about-button:hover {
+#center-button:hover, #auth-button:hover, #my-maps-button:hover, #how-to-use-button:hover, #about-button:hover {
     background-color: #006666;
 }
 
@@ -326,7 +326,7 @@ body {
         gap: 5px;
     }
 
-    #center-button, #how-to-use-button, #about-button {
+    #center-button, #auth-button, #my-maps-button, #how-to-use-button, #about-button {
         width: 100%;
         padding: 12px;
         font-size: 14px;

@@ -1,7 +1,7 @@
 // Import Firebase modules
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
-import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc, collectionGroup } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
+import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc, collectionGroup, query, where } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
 
 // Firebase
 const firebaseConfig = {
@@ -34,6 +34,25 @@ let isGoogleUser = false; // whether the current signed-in user is a Google auth
 let authModal = null; // modal prompting sign-in
 let pendingLatLng = null; // store attempted lat/lng when user is prompted to sign in
 let selectedPinColor = '#008080'; // default pin color
+let myMapsModal = null; // modal for My Maps
+let activeMapId = localStorage.getItem('activeMapId') || null; // currently selected map
+let activeMapName = localStorage.getItem('activeMapName') || null; // optional persisted map name
+let currentLocationStatus = ''; // base location/status text (search/center messages)
+
+function setLocationStatus(text) {
+    currentLocationStatus = text || '';
+    updateLocationStatusDisplay();
+}
+
+function updateLocationStatusDisplay() {
+    const el = document.getElementById('location-status');
+    if (!el) return;
+    if (activeMapName) {
+        el.textContent = currentLocationStatus ? `${currentLocationStatus} — Map: ${activeMapName}` : `Map: ${activeMapName}`;
+    } else {
+        el.textContent = currentLocationStatus || '';
+    }
+}
 
 // Validate latitude and longitude values
 function isValidLatLng(lat, lng) {
@@ -79,12 +98,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showToast('Pending location is invalid and was discarded.');
             }
         }
+        // If My Maps modal is open, refresh the list when auth changes
+        try {
+            if (myMapsModal && myMapsModal.style && myMapsModal.style.display === 'block') {
+                loadUserMaps().catch(() => {});
+            }
+        } catch (e) {}
     });
     await getUserLocation();
     initMap();
     initModals();
     initSearch();
     loadPins();
+    // Refresh displayed status to include selected map if any
+    updateLocationStatusDisplay();
 });
 
 // Update auth button UI text
@@ -159,10 +186,10 @@ async function getUserLocation() {
 
     // try browser geolocation first
     try {
-        const coords = await getBrowserLocation(10000);
-        currentLat = coords.latitude;
-        currentLng = coords.longitude;
-        document.getElementById('location-status').textContent = `Centered on your current location.`;
+    const coords = await getBrowserLocation(10000);
+    currentLat = coords.latitude;
+    currentLng = coords.longitude;
+    setLocationStatus(`Centered on your current location.`);
     } catch (geoError) {
         console.warn('Browser geolocation failed or denied:', geoError);
 
@@ -173,13 +200,13 @@ async function getUserLocation() {
             if (data && data.latitude && data.longitude) {
                 currentLat = data.latitude;
                 currentLng = data.longitude;
-                document.getElementById('location-status').textContent = `Browser location access denied, approximated location may not be accurate.`;
+                setLocationStatus(`Browser location access denied, approximated location may not be accurate.`);
             } else {
                 throw new Error('IP geolocation returned invalid data');
             }
         } catch (ipError) {
             console.error('IP geolocation error:', ipError);
-            document.getElementById('location-status').textContent = 'Unable to contact geolocation server, please check your connection.';
+            setLocationStatus('Unable to contact geolocation server, please check your connection.');
             currentLat = 37.7749;
             currentLng = -122.4194;
         }
@@ -240,6 +267,7 @@ function initModals() {
     howToUseModal = document.getElementById('how-to-use-modal');
     aboutModal = document.getElementById('about-modal');
     authModal = document.getElementById('auth-required-modal');
+    myMapsModal = document.getElementById('my-maps-modal');
 
     // Pin modal
     document.querySelector('#pin-modal .close').onclick = () => { pinModal.style.display = 'none'; };
@@ -280,6 +308,26 @@ function initModals() {
         });
         if (cancelBtn) cancelBtn.addEventListener('click', () => { authModal.style.display = 'none'; pendingLatLng = null; });
     }
+    // My Maps modal
+    const myMapsButton = document.getElementById('my-maps-button');
+    if (myMapsButton) {
+        myMapsButton.addEventListener('click', openMyMapsModal);
+    }
+    if (myMapsModal) {
+        const closeMyMaps = document.querySelector('.close-my-maps');
+        if (closeMyMaps) closeMyMaps.onclick = () => { myMapsModal.style.display = 'none'; };
+        const createBtn = document.getElementById('create-map-button');
+        if (createBtn) createBtn.addEventListener('click', createUserMap);
+        const deactivateBtn = document.getElementById('deactivate-map-button');
+        if (deactivateBtn) deactivateBtn.addEventListener('click', deactivateActiveMap);
+        // allow pressing Enter in the new-map-name input to create
+        const newMapInput = document.getElementById('new-map-name');
+        if (newMapInput) {
+            newMapInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') createUserMap(); });
+        }
+    }
+    // Ensure deactivate button reflects current state on init
+    try { updateDeactivateButtonVisibility(); } catch (e) {}
     // Initialize color palette buttons
     const paletteEl = document.getElementById('color-palette');
     const colors = ['#008080', '#FF3B30', '#FF9500', '#FFCC00', '#34C759', '#007AFF', '#5856D6', '#8E8E93'];
@@ -319,6 +367,200 @@ function updatePaletteSelectionUI() {
         if (s.dataset.color === selectedPinColor) s.classList.add('selected');
         else s.classList.remove('selected');
     });
+}
+
+// --- My Maps: load/create/delete/select user maps ---
+async function openMyMapsModal() {
+    if (!isGoogleUser) {
+        if (authModal) authModal.style.display = 'block';
+        else showToast('Please sign in with Google to manage your maps.');
+        return;
+    }
+    if (!myMapsModal) return;
+    myMapsModal.style.display = 'block';
+    await loadUserMaps();
+}
+
+async function loadUserMaps() {
+    const listEl = document.getElementById('my-maps-list');
+    const createInput = document.getElementById('new-map-name');
+    if (!listEl) return;
+    listEl.innerHTML = '<li style="color:#666;">Loading...</li>';
+    try {
+        // Query only maps owned by the current user (rules require this)
+        const q = query(collection(db, 'userMaps'), where('ownerId', '==', currentUserId));
+        const snap = await getDocs(q);
+        const docs = [];
+        snap.forEach((d) => { docs.push({ id: d.id, data: d.data() }); });
+        // sort by createdAt desc
+        docs.sort((a, b) => {
+            const ta = a.data.createdAt ? new Date(a.data.createdAt).getTime() : 0;
+            const tb = b.data.createdAt ? new Date(b.data.createdAt).getTime() : 0;
+            return tb - ta;
+        });
+        if (docs.length === 0) {
+            listEl.innerHTML = '<li style="color:#666;">No maps yet. Create one using the + button.</li>';
+        } else {
+            listEl.innerHTML = '';
+            docs.forEach((m) => {
+                const li = document.createElement('li');
+                li.style.display = 'flex';
+                li.style.justifyContent = 'space-between';
+                li.style.alignItems = 'center';
+                li.style.padding = '6px 4px';
+                li.style.borderBottom = '1px solid #eee';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = m.data.name || '(untitled)';
+                nameSpan.style.cursor = 'pointer';
+                nameSpan.addEventListener('click', () => {
+                    setActiveMap(m.id, m.data.name);
+                    // close modal after selection
+                    if (myMapsModal) myMapsModal.style.display = 'none';
+                });
+
+                const actions = document.createElement('span');
+                actions.style.display = 'flex';
+                actions.style.gap = '6px';
+
+                const selectIndicator = document.createElement('small');
+                selectIndicator.style.color = '#007AFF';
+                selectIndicator.style.marginRight = '6px';
+                if (activeMapId === m.id) {
+                    selectIndicator.textContent = 'Active';
+                    // ensure active map name is set so the status line can show it
+                    activeMapName = m.data.name || null;
+                    if (activeMapName) localStorage.setItem('activeMapName', activeMapName);
+                    updateLocationStatusDisplay();
+                }
+
+                const delBtn = document.createElement('button');
+                delBtn.textContent = 'Delete';
+                delBtn.style.background = '#FF3B30';
+                delBtn.style.color = 'white';
+                delBtn.style.border = 'none';
+                delBtn.style.padding = '4px 8px';
+                delBtn.style.borderRadius = '4px';
+                delBtn.addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    ev.preventDefault();
+                    await deleteUserMap(m.id, m.data.name);
+                });
+
+                actions.appendChild(selectIndicator);
+                actions.appendChild(delBtn);
+
+                li.appendChild(nameSpan);
+                li.appendChild(actions);
+                listEl.appendChild(li);
+            });
+        }
+        // update deactivate button visibility
+        updateDeactivateButtonVisibility();
+        // clear create input
+        if (createInput) createInput.value = '';
+    } catch (err) {
+        console.error('Failed to load user maps:', err);
+        listEl.innerHTML = '<li style="color:#c62828;">Failed to load maps.</li>';
+    }
+}
+
+function updateDeactivateButtonVisibility() {
+    const btn = document.getElementById('deactivate-map-button');
+    if (!btn) return;
+    if (activeMapId) {
+        btn.style.display = 'inline-block';
+        btn.style.background = '#FFCC00';
+        btn.style.color = '#000';
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+function deactivateActiveMap() {
+    if (!activeMapId) {
+        showToast('No active map to deactivate.');
+        return;
+    }
+    const ok = window.confirm('Deactivate the currently selected map?');
+    if (!ok) return;
+    activeMapId = null;
+    activeMapName = null;
+    localStorage.removeItem('activeMapId');
+    localStorage.removeItem('activeMapName');
+    updateDeactivateButtonVisibility();
+    updateLocationStatusDisplay();
+    showToast('Map deactivated');
+    // refresh list so 'Active' indicators update
+    if (myMapsModal && myMapsModal.style.display === 'block') loadUserMaps().catch(() => {});
+}
+
+async function createUserMap() {
+    if (!isGoogleUser) {
+        if (authModal) authModal.style.display = 'block';
+        else showToast('Please sign in with Google to create maps.');
+        return;
+    }
+    const input = document.getElementById('new-map-name');
+    if (!input) return;
+    const name = input.value.trim();
+    if (!name) { showToast('Enter a name for the map.'); return; }
+    if (name.length > 50) { showToast('Map name too long (50 char max).'); return; }
+    try {
+        // enforce max 5 maps
+    // count existing maps owned by the user using a filtered query
+    const countQ = query(collection(db, 'userMaps'), where('ownerId', '==', currentUserId));
+    const snap = await getDocs(countQ);
+    let count = snap.size;
+        if (count >= 5) { showToast('You have reached the 5-map limit. Delete an existing map to create a new one.'); return; }
+
+        await addDoc(collection(db, 'userMaps'), {
+            ownerId: currentUserId,
+            name,
+            createdAt: new Date()
+        });
+        showToast('Map created');
+        await loadUserMaps();
+    } catch (err) {
+        console.error('Failed to create map:', err);
+        showToast('Failed to create map: ' + (err.message || err));
+    }
+}
+
+async function deleteUserMap(mapId, mapName) {
+    if (!mapId) return;
+    const ok = window.confirm(`Delete map "${mapName || ''}"? This cannot be undone.`);
+    if (!ok) return;
+    try {
+        await deleteDoc(doc(db, 'userMaps', mapId));
+        showToast('Map deleted');
+        if (activeMapId === mapId) {
+            activeMapId = null;
+            activeMapName = null;
+            localStorage.removeItem('activeMapId');
+            localStorage.removeItem('activeMapName');
+            updateLocationStatusDisplay();
+        }
+        await loadUserMaps();
+    } catch (err) {
+        console.error('Failed to delete map:', err);
+        showToast('Failed to delete map: ' + (err.message || err));
+    }
+}
+
+function setActiveMap(mapId, mapName) {
+    activeMapId = mapId;
+    activeMapName = mapName || null;
+    if (mapId) {
+        localStorage.setItem('activeMapId', mapId);
+        if (activeMapName) localStorage.setItem('activeMapName', activeMapName);
+    } else {
+        localStorage.removeItem('activeMapId');
+        localStorage.removeItem('activeMapName');
+    }
+    updateLocationStatusDisplay();
+    showToast(mapName ? `Selected map: ${mapName}` : 'Map selected');
+    updateDeactivateButtonVisibility();
 }
 
 // small helper: return a divIcon for a pin colored with the provided color
@@ -440,7 +682,7 @@ function initSearch() {
                     li.addEventListener('click', () => {
                         searchInput.value = item.display_name;
                         map.setView([parseFloat(item.lat), parseFloat(item.lon)], 13);
-                        document.getElementById('location-status').textContent = `Showing: ${item.display_name}`;
+                        setLocationStatus(`Showing: ${item.display_name}`);
                         // Add temporary search marker with "Place a pin here" button
                         if (searchMarker) {
                             map.removeLayer(searchMarker); // Remove previous marker
@@ -527,7 +769,7 @@ async function performSearch(query) {
         if (data.length > 0) {
             const { lat, lon, display_name } = data[0];
             map.setView([parseFloat(lat), parseFloat(lon)], 13);
-            document.getElementById('location-status').textContent = `Showing: ${display_name}`;
+            setLocationStatus(`Showing: ${display_name}`);
             // Add temporary search marker with "Place a pin here" button
             if (searchMarker) {
                 map.removeLayer(searchMarker); // Remove previous marker

@@ -16,6 +16,7 @@
         <div id="menu-container">
             <button id="center-button" aria-label="Center map on your approximate location">Center</button>
             <button id="auth-button" aria-label="Sign in with Google">Sign in with Google</button>
+            <button id="my-maps-button" aria-label="Your saved maps">My Maps</button>
             <button id="how-to-use-button" aria-label="View instructions for using the app">How to Use</button>
             <button id="about-button" aria-label="View information about the app">About</button>
         </div>
@@ -62,6 +63,24 @@
             <p>Firebase for data storage, Leaftlet for map data, ipapi.co for IP-based geolocation data.</p>
         </div>
     </div>
+
+        <!-- My Maps Modal -->
+        <div id="my-maps-modal" class="modal">
+            <div class="modal-content">
+                <span class="close close-my-maps">&times;</span>
+                <h2>My Maps</h2>
+                <p style="font-size:13px; color:#555; margin-top:0;">Create and manage up to 5 maps. Select a map to make it active.</p>
+                <div id="my-maps-container">
+                    <ul id="my-maps-list" style="list-style:none; padding:0; margin:8px 0 12px 0;"></ul>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <input id="new-map-name" placeholder="New map name" maxlength="50" style="flex:1; padding:6px;" />
+                    <button id="create-map-button">+</button>
+                    <button id="deactivate-map-button" style="background:#ccc;">Deactivate</button>
+                </div>
+                <p style="font-size:12px; color:#888; margin-top:8px;">Tip: maps are saved to your Google account and available only when signed in.</p>
+            </div>
+        </div>
 
     <!-- Auth required Modal (shown when user tries to place a pin while not signed in) -->
     <div id="auth-required-modal" class="modal">
