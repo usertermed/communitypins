@@ -179,7 +179,7 @@ async function getUserLocation() {
             }
         } catch (ipError) {
             console.error('IP geolocation error:', ipError);
-            document.getElementById('location-status').textContent = 'Using default location (San Francisco).';
+            document.getElementById('location-status').textContent = 'Unable to contact geolocation server, please check your connection.';
             currentLat = 37.7749;
             currentLng = -122.4194;
         }
