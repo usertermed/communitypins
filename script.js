@@ -301,6 +301,16 @@ function initModals() {
         // initial selection
         updatePaletteSelectionUI();
     }
+
+    // Expiry slider in pin modal (1-7 days)
+    const expirySlider = document.getElementById('expiry-slider');
+    const expiryDisplay = document.getElementById('expiry-display');
+    if (expirySlider && expiryDisplay) {
+        expiryDisplay.textContent = expirySlider.value;
+        expirySlider.addEventListener('input', () => {
+            expiryDisplay.textContent = expirySlider.value;
+        });
+    }
 }
 
 function updatePaletteSelectionUI() {
@@ -725,11 +735,16 @@ async function savePin() {
     if (note.length > 100) return; // Enforced by maxlength, but double-check
 
     try {
+        // Read expiry days from the modal slider (default to 7 days)
+        const expiryDays = parseInt(document.getElementById('expiry-slider')?.value || '7', 10);
+        const expiresAt = new Date(Date.now() + (expiryDays * 24 * 60 * 60 * 1000));
+
         const pinRef = await addDoc(collection(db, 'pins'), {
             lat: selectedLatLng.lat,
             lng: selectedLatLng.lng,
             note: note || '',
             timestamp: new Date(),
+            expiresAt: expiresAt,
             createdById: currentUserId || null,
             createdByFirstName: currentUserFirstName || null,
             color: selectedPinColor || '#008080'
@@ -773,6 +788,20 @@ function loadPins() {
                 `;
                 const addedBy = data.createdByFirstName || 'Anonymous';
                 let addedAt = '';
+                // Compute expiry display
+                let expiryHtml = '';
+                try {
+                    if (data && data.expiresAt) {
+                        const exp = (typeof data.expiresAt.toDate === 'function') ? data.expiresAt.toDate() : new Date(data.expiresAt);
+                        const now = new Date();
+                        const msPerDay = 24 * 60 * 60 * 1000;
+                        const daysLeft = Math.ceil((exp - now) / msPerDay);
+                        if (daysLeft > 1) expiryHtml = `<small>Expires in: ${daysLeft} days</small><br>`;
+                        else if (daysLeft === 1) expiryHtml = `<small>Expires in: 1 day</small><br>`;
+                        else if (daysLeft === 0) expiryHtml = `<small>Expires today</small><br>`;
+                        else expiryHtml = `<small>Expired</small><br>`;
+                    }
+                } catch (e) { /* ignore expiry parse errors */ }
                 try {
                     if (data.timestamp && typeof data.timestamp.toDate === 'function') {
                         addedAt = data.timestamp.toDate().toLocaleString();
@@ -784,6 +813,7 @@ function loadPins() {
                     ${data.note ? `<strong>${data.note}</strong><br>` : ''}
                     ${addedAt ? `<small>Added: ${addedAt}</small><br>` : ''}
                     <small>Added by: ${addedBy}</small><br>
+                    ${expiryHtml}
                     <div class="heart-section">${heartButtonHtml}</div>
                 `;
                 const popup = marker.bindPopup(popupContent);
@@ -893,6 +923,20 @@ function loadPins() {
                 `;
                 const addedBy = data.createdByFirstName || 'Anonymous';
                 let addedAt = '';
+                // Compute expiry display for reported pins as well
+                let expiryHtmlReported = '';
+                try {
+                    if (data && data.expiresAt) {
+                        const exp = (typeof data.expiresAt.toDate === 'function') ? data.expiresAt.toDate() : new Date(data.expiresAt);
+                        const now = new Date();
+                        const msPerDay = 24 * 60 * 60 * 1000;
+                        const daysLeft = Math.ceil((exp - now) / msPerDay);
+                        if (daysLeft > 1) expiryHtmlReported = `<small>Expires in: ${daysLeft} days</small><br>`;
+                        else if (daysLeft === 1) expiryHtmlReported = `<small>Expires in: 1 day</small><br>`;
+                        else if (daysLeft === 0) expiryHtmlReported = `<small>Expires today</small><br>`;
+                        else expiryHtmlReported = `<small>Expired</small><br>`;
+                    }
+                } catch (e) { /* ignore */ }
                 try {
                     if (data.timestamp && typeof data.timestamp.toDate === 'function') {
                         addedAt = data.timestamp.toDate().toLocaleString();
@@ -904,6 +948,7 @@ function loadPins() {
                     ${data.note ? `<strong>${data.note}</strong><br>` : ''}
                     ${addedAt ? `<small>Added: ${addedAt}</small><br>` : ''}
                     <small>Added by: ${addedBy}</small><br>
+                    ${expiryHtmlReported}
                     <div class="heart-section">${heartButtonHtml}</div>
                 `;
                 marker.bindPopup(popupContent);
@@ -946,10 +991,25 @@ function loadPins() {
         onSnapshot(collection(db, 'pins'), orderBy('timestamp', 'desc'), async (snapshot) => {
             const promises = [];
             snapshot.forEach((docSnapshot) => {
-                const pinId = docSnapshot.id;
-                const data = docSnapshot.data();
-                // Fetch both hearts and dislikes counts and whether current user has acted
-                const heartsPromise = getDocs(collection(db, 'pins', pinId, 'hearts'))
+                    const pinId = docSnapshot.id;
+                    const data = docSnapshot.data();
+                    // Skip expired pins (if expiresAt exists and is in the past)
+                    try {
+                        let expires = null;
+                        if (data && data.expiresAt) {
+                            if (typeof data.expiresAt.toDate === 'function') expires = data.expiresAt.toDate();
+                            else expires = new Date(data.expiresAt);
+                        }
+                        if (expires && expires <= new Date()) {
+                            // don't include this pin
+                            return;
+                        }
+                    } catch (e) {
+                        // ignore parse errors and continue
+                    }
+
+                    // Fetch both hearts and dislikes counts and whether current user has acted
+                    const heartsPromise = getDocs(collection(db, 'pins', pinId, 'hearts'))
                     .then((heartsSnapshot) => ({
                         heartCount: heartsSnapshot.size,
                         isHearted: heartsSnapshot.docs.some(d => d.id === currentUserId)
@@ -998,8 +1058,22 @@ function loadPins() {
         onSnapshot(collection(db, 'reported'), orderBy('reportedAt', 'desc'), async (snapshot) => {
             const reports = [];
             snapshot.forEach((docSnapshot) => {
-                reports.push({ reportId: docSnapshot.id, data: docSnapshot.data() });
-            });
+                    const data = docSnapshot.data();
+                    // Skip expired reported docs
+                    try {
+                        let expires = null;
+                        if (data && data.expiresAt) {
+                            if (typeof data.expiresAt.toDate === 'function') expires = data.expiresAt.toDate();
+                            else expires = new Date(data.expiresAt);
+                        }
+                        if (expires && expires <= new Date()) {
+                            return; // skip
+                        }
+                    } catch (e) {
+                        // ignore and include the report
+                    }
+                    reports.push({ reportId: docSnapshot.id, data });
+                });
             window._reportedCache = reports;
             renderAllMarkers();
         }, (error) => {

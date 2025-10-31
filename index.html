@@ -32,6 +32,10 @@
                 <!-- color swatches will be populated by JS or can be static --></div>
             <p style="margin:6px 0 0 0; font-size:13px; color:#555;">Choose a color for your pin</p>
             <textarea id="note-input" placeholder="Add a note (max 100 characters)" maxlength="100"></textarea>
+            <div style="margin:8px 0; font-size:13px; color:#555;">
+                <label for="expiry-slider">Expire pin after <span id="expiry-display">7</span> day(s)</label>
+                <input id="expiry-slider" type="range" min="1" max="7" step="1" value="7" aria-label="Pin expiry in days">
+            </div>
             <button id="save-pin">Save</button>
             <button id="cancel-pin">Cancel</button>
         </div>
