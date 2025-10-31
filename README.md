@@ -5,17 +5,21 @@
 Project for 2025 Missouri TSA Website Design.
 
 ## Documentation / Technical write-up
+
 ### written by Damien
 
 I decided to use Firebase for all of the data storage, authentication, and hosting.
 
 ### Data architecture
+
 When a pin is created, an object is created with a server-generated ID (example: 0sqCWvbM080IRdSQ865K), put into the collection **pins**. This object contains latitude, longitude, timestamp, note, first name and user ID.
 
-When a pin object is "hearted", a collection called "hearts" is created (if not already exists) and a heart object (also with a server generated ID) is added to the hearts collection. This object only contains the user ID and timestamp, mainly for analytics reasons.
+When a pin object is "hearted" or "disliked", a collection called "hearts" or "dislikes" is created (if not already exists) and a heart/dislike object (also with a server generated ID) is added to the hearts/dislikes collection. This object only contains the user ID and timestamp, mainly for analytics reasons.
 
 ### Authentication
+
 There was very minimal implementation of any sort of authentication. Infact, the main use for authenticating in the first place is to have the name of who pinned a pin on the pin (say that three times fast). Authentication is handled through Firebase (to maintain simplicity and because Google authentication goes hand-in-hand with Firebase), so I only needed to add a few parts to script.js, and the button to index.html.
 
 ### Hosting
-This was definitely the easiest part. All I had to do was clone the repository, run ```firebase init:github``` and follow the instructions to get the workflow files for GitHub actions. Now, when anything is commited to `deploy` branch it is automatically deployed on Firebase hosting.
+
+This was definitely the easiest part. All I had to do was clone the repository, run `firebase init:github` and follow the instructions to get the workflow files for GitHub actions. Now, when anything is commited to `deploy` branch it is automatically deployed on Firebase hosting.
