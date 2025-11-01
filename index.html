@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Community Pins</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://kit.fontawesome.com/f08a128311.js" crossorigin="anonymous"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,9 +17,9 @@
         <div id="menu-container">
             <button id="center-button" aria-label="Center map on your approximate location">Center</button>
             <button id="auth-button" aria-label="Sign in / Sign out">Sign in</button>
-            <button id="my-maps-button" aria-label="Your saved maps">My Maps</button>
-            <button id="how-to-use-button" aria-label="View instructions for using the app">How to Use</button>
-            <button id="about-button" aria-label="View information about the app">About</button>
+            <button id="my-maps-button" aria-label="Your saved maps"><i class="fa-solid fa-map" style="color: #ffffff;"></i></button>
+            <button id="how-to-use-button" aria-label="View instructions for using the app"><i class="fa-solid fa-question" style="color: #ffffff;"></i></button>
+            <button id="about-button" aria-label="View information about the app"><i class="fa-solid fa-info" style="color: #ffffff;"></i></button>
         </div>
         <div id="location-status">Loading location...</div>
         <div id="map"></div>
@@ -100,8 +101,8 @@
                 <h2>Sign in</h2>
                 <p style="margin-top:0;">Choose a provider to sign in:</p>
                 <div style="display:flex; gap:8px; margin-top:8px;">
-                    <button id="auth-choice-google" style="flex:1; background:#4285F4; color:#fff; border:none; padding:8px; border-radius:6px;">Sign in with Google</button>
-                    <button id="auth-choice-github" style="flex:1; background:#333; color:#fff; border:none; padding:8px; border-radius:6px;">Sign in with GitHub</button>
+                    <button id="auth-choice-google" style="flex:1; background:#4285F4; color:#fff; border:none; padding:8px; border-radius:6px;"><i class="fa-brands fa-google" style="color: #ffffff;"></i> Sign in with Google</button>
+                    <button id="auth-choice-github" style="flex:1; background:#333; color:#fff; border:none; padding:8px; border-radius:6px;"><i class="fa-brands fa-github" style="color: #ffffff;"></i> Sign in with GitHub</button>
                 </div>
                 <p style="font-size:12px; color:#666; margin-top:8px;">You can sign out later using the Sign out button.</p>
             </div>

@@ -87,7 +87,7 @@ body {
     border: none;
     border-radius: 6px; /* increased from 4px */
     cursor: pointer;
-    min-width: 100px;
+    min-width: 20px;
 }
 
 #center-button:hover, #auth-button:hover, #my-maps-button:hover, #how-to-use-button:hover, #about-button:hover {
