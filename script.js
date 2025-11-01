@@ -1,6 +1,6 @@
 // Import Firebase modules
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
+import { getAuth, GoogleAuthProvider, GithubAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
 import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc, collectionGroup, query, where } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
 
 // Firebase
@@ -31,7 +31,10 @@ let searchMarker = null; // Track temporary search marker
 let currentUserId = null; // Track anonymous user ID
 let currentUserFirstName = null; // Track Google user first name (if available)
 let isGoogleUser = false; // whether the current signed-in user is a Google authenticated user
+let isGithubUser = false; // whether the current signed-in user is a GitHub authenticated user
+let isOAuthUser = false; // whether signed in with any supported OAuth provider
 let authModal = null; // modal prompting sign-in
+let authChoiceModal = null; // modal to choose auth provider
 let pendingLatLng = null; // store attempted lat/lng when user is prompted to sign in
 let selectedPinColor = '#008080'; // default pin color
 let myMapsModal = null; // modal for My Maps
@@ -73,16 +76,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             currentUserId = user.uid;
             // Save first name if available
             currentUserFirstName = user.displayName ? user.displayName.split(' ')[0] : null;
-            // Determine whether the signed-in user used Google provider
+            // Determine which provider(s) the signed-in user used
             isGoogleUser = user.providerData && user.providerData.some(p => p.providerId === 'google.com');
+            isGithubUser = user.providerData && user.providerData.some(p => p.providerId === 'github.com');
+            isOAuthUser = !!(isGoogleUser || isGithubUser);
         } else {
             currentUserId = null;
             currentUserFirstName = null;
             isGoogleUser = false;
+            isGithubUser = false;
+            isOAuthUser = false;
         }
         updateAuthUI();
-        // If the user just signed in via Google and they had a pending location, open pin modal
-        if (isGoogleUser && pendingLatLng) {
+    // If the user just signed in with any supported provider and they had a pending location, open pin modal
+    if (isOAuthUser && pendingLatLng) {
             if (isValidLatLng(pendingLatLng.lat, pendingLatLng.lng)) {
                 selectedLatLng = pendingLatLng;
                 pendingLatLng = null;
@@ -119,11 +126,12 @@ function updateAuthUI() {
     const authButton = document.getElementById('auth-button');
     if (!authButton) return;
     const user = auth.currentUser;
-    if (user && user.providerData && user.providerData.some(p => p.providerId === 'google.com')) {
+    if (user) {
+        const provider = isGoogleUser ? 'Google' : (isGithubUser ? 'GitHub' : 'Account');
         const namePart = currentUserFirstName ? ` (${currentUserFirstName})` : '';
-        authButton.textContent = `Sign out${namePart}`;
+        authButton.textContent = `Sign out (${provider})${namePart}`;
     } else {
-        authButton.textContent = 'Sign in with Google';
+        authButton.textContent = 'Sign in';
     }
 }
 
@@ -131,7 +139,7 @@ function updateAuthUI() {
 async function handleAuthButtonClick() {
     const user = auth.currentUser;
     // If already signed in with Google, sign out
-    if (user && user.providerData && user.providerData.some(p => p.providerId === 'google.com')) {
+    if (user) {
         try {
             await signOut(auth);
             showToast('Signed out');
@@ -142,15 +150,13 @@ async function handleAuthButtonClick() {
         return;
     }
 
-    // Otherwise, initiate Google sign-in
-    const provider = new GoogleAuthProvider();
+    // Otherwise, open the auth choice modal so the user can pick a provider
     try {
-        const result = await signInWithPopup(auth, provider);
-        // result.user contains the signed-in user; onAuthStateChanged will update UI
-        showToast(`Signed in as ${result.user.displayName || 'Google user'}`);
+        if (authChoiceModal) authChoiceModal.style.display = 'block';
+        else showToast('Choose a sign-in provider.');
     } catch (err) {
-        console.error('Google sign-in error:', err);
-        showToast('Google sign-in failed: ' + (err.message || err));
+        console.error('Could not open auth choice modal:', err);
+        showToast('Sign-in failed: ' + (err.message || err));
     }
 }
 
@@ -240,11 +246,11 @@ function initMap() {
             return;
         }
 
-        if (!isGoogleUser) {
+        if (!isOAuthUser) {
             // Prompt user to sign in and remember the attempted location
             pendingLatLng = { lat, lng };
             if (authModal) authModal.style.display = 'block';
-            else showToast('Please sign in with Google to add pins.');
+            else showToast('Please sign in (Google or GitHub) to add pins.');
             return;
         }
 
@@ -313,6 +319,44 @@ function initModals() {
     if (myMapsButton) {
         myMapsButton.addEventListener('click', openMyMapsModal);
     }
+    // Auth-choice modal: wire Google / GitHub provider buttons
+    authChoiceModal = document.getElementById('auth-choice-modal');
+    const authChoiceClose = document.querySelector('.close-auth-choice');
+    if (authChoiceClose) authChoiceClose.onclick = () => { if (authChoiceModal) authChoiceModal.style.display = 'none'; };
+    const authChoiceGoogle = document.getElementById('auth-choice-google');
+    const authChoiceGithub = document.getElementById('auth-choice-github');
+    if (authChoiceGoogle) {
+        authChoiceGoogle.addEventListener('click', async () => {
+            const user = auth.currentUser;
+            if (user) { showToast('Please sign out first.'); return; }
+            const provider = new GoogleAuthProvider();
+            try {
+                const result = await signInWithPopup(auth, provider);
+                showToast(`Signed in as ${result.user.displayName || 'user'}`);
+            } catch (err) {
+                console.error('Sign-in error:', err);
+                showToast('Sign-in failed: ' + (err.message || err));
+            } finally {
+                if (authChoiceModal) authChoiceModal.style.display = 'none';
+            }
+        });
+    }
+    if (authChoiceGithub) {
+        authChoiceGithub.addEventListener('click', async () => {
+            const user = auth.currentUser;
+            if (user) { showToast('Please sign out first.'); return; }
+            const provider = new GithubAuthProvider();
+            try {
+                const result = await signInWithPopup(auth, provider);
+                showToast(`Signed in as ${result.user.displayName || 'GitHub user'}`);
+            } catch (err) {
+                console.error('GitHub sign-in error:', err);
+                showToast('GitHub sign-in failed: ' + (err.message || err));
+            } finally {
+                if (authChoiceModal) authChoiceModal.style.display = 'none';
+            }
+        });
+    }
     if (myMapsModal) {
         const closeMyMaps = document.querySelector('.close-my-maps');
         if (closeMyMaps) closeMyMaps.onclick = () => { myMapsModal.style.display = 'none'; };
@@ -371,9 +415,9 @@ function updatePaletteSelectionUI() {
 
 // --- My Maps: load/create/delete/select user maps ---
 async function openMyMapsModal() {
-    if (!isGoogleUser) {
+    if (!isOAuthUser) {
         if (authModal) authModal.style.display = 'block';
-        else showToast('Please sign in with Google to manage your maps.');
+        else showToast('Please sign in (Google or GitHub) to manage your maps.');
         return;
     }
     if (!myMapsModal) return;
@@ -496,9 +540,9 @@ function deactivateActiveMap() {
 }
 
 async function createUserMap() {
-    if (!isGoogleUser) {
+    if (!isOAuthUser) {
         if (authModal) authModal.style.display = 'block';
-        else showToast('Please sign in with Google to create maps.');
+        else showToast('Please sign in (Google or GitHub) to create maps.');
         return;
     }
     const input = document.getElementById('new-map-name');
@@ -716,10 +760,10 @@ function initSearch() {
                                                 return;
                                             }
                                             // If not signed in with Google, prompt and store pending lat/lng
-                                            if (!isGoogleUser) {
+                                            if (!isOAuthUser) {
                                                 pendingLatLng = { lat, lng: lon };
                                                 if (authModal) authModal.style.display = 'block';
-                                                else showToast('Please sign in with Google to add pins.');
+                                                else showToast('Please sign in (Google or GitHub) to add pins.');
                                                 return;
                                             }
                                             selectedLatLng = { lat, lng: lon };
@@ -802,10 +846,10 @@ async function performSearch(query) {
                                     showToast('Invalid location coordinates; cannot place pin.');
                                     return;
                                 }
-                                if (!isGoogleUser) {
+                                if (!isOAuthUser) {
                                     pendingLatLng = { lat: parsedLat, lng: parsedLon };
                                     if (authModal) authModal.style.display = 'block';
-                                    else showToast('Please sign in with Google to add or report pins.');
+                                    else showToast('Please sign in (Google or GitHub) to add or report pins.');
                                     return;
                                 }
                                 selectedLatLng = { lat: parsedLat, lng: parsedLon };
@@ -851,8 +895,8 @@ function showToast(message) {
 
 // Toggle heart for a pin
 async function toggleHeart(pinId, currentCount, isHearted) {
-    if (!isGoogleUser) {
-        showToast('Please sign in with Google to like pins.');
+    if (!isOAuthUser) {
+        showToast('Please sign in (Google or GitHub) to like pins.');
         return;
     }
     if (!pinId || typeof pinId !== 'string' || pinId.trim() === '') {
@@ -905,8 +949,8 @@ async function toggleHeart(pinId, currentCount, isHearted) {
 
 // Toggle dislike for a pin (mirrors heart logic)
 async function toggleDislike(pinId, currentCount, isDisliked) {
-    if (!isGoogleUser) {
-        showToast('Please sign in with Google to dislike pins.');
+    if (!isOAuthUser) {
+        showToast('Please sign in (Google or GitHub) to dislike pins.');
         return;
     }
     if (!pinId || typeof pinId !== 'string' || pinId.trim() === '') {
@@ -960,8 +1004,8 @@ async function toggleDislike(pinId, currentCount, isDisliked) {
 // Save pin to Firestore
 async function savePin() {
     if (!selectedLatLng) return;
-    if (!isGoogleUser) {
-        showToast('Please sign in with Google to add pins.');
+    if (!isOAuthUser) {
+        showToast('Please sign in (Google or GitHub) to add pins.');
         return;
     }
 
@@ -1128,7 +1172,7 @@ function loadPins() {
                                 e.stopPropagation();
                                 e.preventDefault();
                                 if (data.reported) { showToast('Report submitted.'); return; }
-                                if (!isGoogleUser) { if (authModal) authModal.style.display = 'block'; else showToast('Please sign in with Google to report pins.'); return; }
+                                if (!isOAuthUser) { if (authModal) authModal.style.display = 'block'; else showToast('Please sign in (Google or GitHub) to report pins.'); return; }
                                 const note = window.prompt('Optional: add a short reason for reporting (press Cancel to skip)');
                                 try { reportBtn.disabled = true; await reportPin(pinId, data, note || ''); showToast('Pin reported.'); }
                                 catch (err) { console.error('Report failed:', err); if (err && err.code && err.code.includes('permission')) { showToast('Reported — pending review (insufficient permissions to remove).'); } else { showToast('Failed to report pin: ' + (err.message || err)); } }
