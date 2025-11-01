@@ -551,12 +551,12 @@ async function createUserMap() {
     if (!name) { showToast('Enter a name for the map.'); return; }
     if (name.length > 50) { showToast('Map name too long (50 char max).'); return; }
     try {
-        // enforce max 5 maps
+        // enforce max 8 maps
     // count existing maps owned by the user using a filtered query
     const countQ = query(collection(db, 'userMaps'), where('ownerId', '==', currentUserId));
     const snap = await getDocs(countQ);
     let count = snap.size;
-        if (count >= 5) { showToast('You have reached the 5-map limit. Delete an existing map to create a new one.'); return; }
+        if (count >= 8) { showToast('You have reached the 8-map limit. Delete an existing map to create a new one.'); return; }
 
         await addDoc(collection(db, 'userMaps'), {
             ownerId: currentUserId,
