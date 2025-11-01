@@ -1,7 +1,7 @@
 // Import Firebase modules
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
-import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc, collectionGroup } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
+import { getAuth, GoogleAuthProvider, GithubAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
+import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc, collectionGroup, query, where } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
 
 // Firebase
 const firebaseConfig = {
@@ -31,9 +31,31 @@ let searchMarker = null; // Track temporary search marker
 let currentUserId = null; // Track anonymous user ID
 let currentUserFirstName = null; // Track Google user first name (if available)
 let isGoogleUser = false; // whether the current signed-in user is a Google authenticated user
+let isGithubUser = false; // whether the current signed-in user is a GitHub authenticated user
+let isOAuthUser = false; // whether signed in with any supported OAuth provider
 let authModal = null; // modal prompting sign-in
+let authChoiceModal = null; // modal to choose auth provider
 let pendingLatLng = null; // store attempted lat/lng when user is prompted to sign in
 let selectedPinColor = '#008080'; // default pin color
+let myMapsModal = null; // modal for My Maps
+let activeMapId = localStorage.getItem('activeMapId') || null; // currently selected map
+let activeMapName = localStorage.getItem('activeMapName') || null; // optional persisted map name
+let currentLocationStatus = ''; // base location/status text (search/center messages)
+
+function setLocationStatus(text) {
+    currentLocationStatus = text || '';
+    updateLocationStatusDisplay();
+}
+
+function updateLocationStatusDisplay() {
+    const el = document.getElementById('location-status');
+    if (!el) return;
+    if (activeMapName) {
+        el.textContent = currentLocationStatus ? `${currentLocationStatus} — Map: ${activeMapName}` : `Map: ${activeMapName}`;
+    } else {
+        el.textContent = currentLocationStatus || '';
+    }
+}
 
 // Validate latitude and longitude values
 function isValidLatLng(lat, lng) {
@@ -54,16 +76,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             currentUserId = user.uid;
             // Save first name if available
             currentUserFirstName = user.displayName ? user.displayName.split(' ')[0] : null;
-            // Determine whether the signed-in user used Google provider
+            // Determine which provider(s) the signed-in user used
             isGoogleUser = user.providerData && user.providerData.some(p => p.providerId === 'google.com');
+            isGithubUser = user.providerData && user.providerData.some(p => p.providerId === 'github.com');
+            isOAuthUser = !!(isGoogleUser || isGithubUser);
         } else {
             currentUserId = null;
             currentUserFirstName = null;
             isGoogleUser = false;
+            isGithubUser = false;
+            isOAuthUser = false;
         }
         updateAuthUI();
-        // If the user just signed in via Google and they had a pending location, open pin modal
-        if (isGoogleUser && pendingLatLng) {
+    // If the user just signed in with any supported provider and they had a pending location, open pin modal
+    if (isOAuthUser && pendingLatLng) {
             if (isValidLatLng(pendingLatLng.lat, pendingLatLng.lng)) {
                 selectedLatLng = pendingLatLng;
                 pendingLatLng = null;
@@ -79,12 +105,20 @@ document.addEventListener('DOMContentLoaded', async () => {
                 showToast('Pending location is invalid and was discarded.');
             }
         }
+        // If My Maps modal is open, refresh the list when auth changes
+        try {
+            if (myMapsModal && myMapsModal.style && myMapsModal.style.display === 'block') {
+                loadUserMaps().catch(() => {});
+            }
+        } catch (e) {}
     });
     await getUserLocation();
     initMap();
     initModals();
     initSearch();
     loadPins();
+    // Refresh displayed status to include selected map if any
+    updateLocationStatusDisplay();
 });
 
 // Update auth button UI text
@@ -92,11 +126,12 @@ function updateAuthUI() {
     const authButton = document.getElementById('auth-button');
     if (!authButton) return;
     const user = auth.currentUser;
-    if (user && user.providerData && user.providerData.some(p => p.providerId === 'google.com')) {
+    if (user) {
+        const provider = isGoogleUser ? 'Google' : (isGithubUser ? 'GitHub' : 'Account');
         const namePart = currentUserFirstName ? ` (${currentUserFirstName})` : '';
-        authButton.textContent = `Sign out${namePart}`;
+        authButton.textContent = `Sign out (${provider})${namePart}`;
     } else {
-        authButton.textContent = 'Sign in with Google';
+        authButton.textContent = 'Sign in';
     }
 }
 
@@ -104,7 +139,7 @@ function updateAuthUI() {
 async function handleAuthButtonClick() {
     const user = auth.currentUser;
     // If already signed in with Google, sign out
-    if (user && user.providerData && user.providerData.some(p => p.providerId === 'google.com')) {
+    if (user) {
         try {
             await signOut(auth);
             showToast('Signed out');
@@ -115,15 +150,13 @@ async function handleAuthButtonClick() {
         return;
     }
 
-    // Otherwise, initiate Google sign-in
-    const provider = new GoogleAuthProvider();
+    // Otherwise, open the auth choice modal so the user can pick a provider
     try {
-        const result = await signInWithPopup(auth, provider);
-        // result.user contains the signed-in user; onAuthStateChanged will update UI
-        showToast(`Signed in as ${result.user.displayName || 'Google user'}`);
+        if (authChoiceModal) authChoiceModal.style.display = 'block';
+        else showToast('Choose a sign-in provider.');
     } catch (err) {
-        console.error('Google sign-in error:', err);
-        showToast('Google sign-in failed: ' + (err.message || err));
+        console.error('Could not open auth choice modal:', err);
+        showToast('Sign-in failed: ' + (err.message || err));
     }
 }
 
@@ -159,10 +192,10 @@ async function getUserLocation() {
 
     // try browser geolocation first
     try {
-        const coords = await getBrowserLocation(10000);
-        currentLat = coords.latitude;
-        currentLng = coords.longitude;
-        document.getElementById('location-status').textContent = `Centered on your current location.`;
+    const coords = await getBrowserLocation(10000);
+    currentLat = coords.latitude;
+    currentLng = coords.longitude;
+    setLocationStatus(`Centered on your current location.`);
     } catch (geoError) {
         console.warn('Browser geolocation failed or denied:', geoError);
 
@@ -173,13 +206,13 @@ async function getUserLocation() {
             if (data && data.latitude && data.longitude) {
                 currentLat = data.latitude;
                 currentLng = data.longitude;
-                document.getElementById('location-status').textContent = `Browser location access denied, approximated location may not be accurate.`;
+                setLocationStatus(`Browser location access denied, approximated location may not be accurate.`);
             } else {
                 throw new Error('IP geolocation returned invalid data');
             }
         } catch (ipError) {
             console.error('IP geolocation error:', ipError);
-            document.getElementById('location-status').textContent = 'Unable to contact geolocation server, please check your connection.';
+            setLocationStatus('Unable to contact geolocation server, please check your connection.');
             currentLat = 37.7749;
             currentLng = -122.4194;
         }
@@ -213,11 +246,11 @@ function initMap() {
             return;
         }
 
-        if (!isGoogleUser) {
+        if (!isOAuthUser) {
             // Prompt user to sign in and remember the attempted location
             pendingLatLng = { lat, lng };
             if (authModal) authModal.style.display = 'block';
-            else showToast('Please sign in with Google to add pins.');
+            else showToast('Please sign in (Google or GitHub) to add pins.');
             return;
         }
 
@@ -240,6 +273,7 @@ function initModals() {
     howToUseModal = document.getElementById('how-to-use-modal');
     aboutModal = document.getElementById('about-modal');
     authModal = document.getElementById('auth-required-modal');
+    myMapsModal = document.getElementById('my-maps-modal');
 
     // Pin modal
     document.querySelector('#pin-modal .close').onclick = () => { pinModal.style.display = 'none'; };
@@ -280,6 +314,64 @@ function initModals() {
         });
         if (cancelBtn) cancelBtn.addEventListener('click', () => { authModal.style.display = 'none'; pendingLatLng = null; });
     }
+    // My Maps modal
+    const myMapsButton = document.getElementById('my-maps-button');
+    if (myMapsButton) {
+        myMapsButton.addEventListener('click', openMyMapsModal);
+    }
+    // Auth-choice modal: wire Google / GitHub provider buttons
+    authChoiceModal = document.getElementById('auth-choice-modal');
+    const authChoiceClose = document.querySelector('.close-auth-choice');
+    if (authChoiceClose) authChoiceClose.onclick = () => { if (authChoiceModal) authChoiceModal.style.display = 'none'; };
+    const authChoiceGoogle = document.getElementById('auth-choice-google');
+    const authChoiceGithub = document.getElementById('auth-choice-github');
+    if (authChoiceGoogle) {
+        authChoiceGoogle.addEventListener('click', async () => {
+            const user = auth.currentUser;
+            if (user) { showToast('Please sign out first.'); return; }
+            const provider = new GoogleAuthProvider();
+            try {
+                const result = await signInWithPopup(auth, provider);
+                showToast(`Signed in as ${result.user.displayName || 'user'}`);
+            } catch (err) {
+                console.error('Sign-in error:', err);
+                showToast('Sign-in failed: ' + (err.message || err));
+            } finally {
+                if (authChoiceModal) authChoiceModal.style.display = 'none';
+            }
+        });
+    }
+    if (authChoiceGithub) {
+        authChoiceGithub.addEventListener('click', async () => {
+            const user = auth.currentUser;
+            if (user) { showToast('Please sign out first.'); return; }
+            const provider = new GithubAuthProvider();
+            try {
+                const result = await signInWithPopup(auth, provider);
+                showToast(`Signed in as ${result.user.displayName || 'GitHub user'}`);
+            } catch (err) {
+                console.error('GitHub sign-in error:', err);
+                showToast('GitHub sign-in failed: ' + (err.message || err));
+            } finally {
+                if (authChoiceModal) authChoiceModal.style.display = 'none';
+            }
+        });
+    }
+    if (myMapsModal) {
+        const closeMyMaps = document.querySelector('.close-my-maps');
+        if (closeMyMaps) closeMyMaps.onclick = () => { myMapsModal.style.display = 'none'; };
+        const createBtn = document.getElementById('create-map-button');
+        if (createBtn) createBtn.addEventListener('click', createUserMap);
+        const deactivateBtn = document.getElementById('deactivate-map-button');
+        if (deactivateBtn) deactivateBtn.addEventListener('click', deactivateActiveMap);
+        // allow pressing Enter in the new-map-name input to create
+        const newMapInput = document.getElementById('new-map-name');
+        if (newMapInput) {
+            newMapInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') createUserMap(); });
+        }
+    }
+    // Ensure deactivate button reflects current state on init
+    try { updateDeactivateButtonVisibility(); } catch (e) {}
     // Initialize color palette buttons
     const paletteEl = document.getElementById('color-palette');
     const colors = ['#008080', '#FF3B30', '#FF9500', '#FFCC00', '#34C759', '#007AFF', '#5856D6', '#8E8E93'];
@@ -301,6 +393,16 @@ function initModals() {
         // initial selection
         updatePaletteSelectionUI();
     }
+
+    // Expiry slider in pin modal (1-7 days)
+    const expirySlider = document.getElementById('expiry-slider');
+    const expiryDisplay = document.getElementById('expiry-display');
+    if (expirySlider && expiryDisplay) {
+        expiryDisplay.textContent = expirySlider.value;
+        expirySlider.addEventListener('input', () => {
+            expiryDisplay.textContent = expirySlider.value;
+        });
+    }
 }
 
 function updatePaletteSelectionUI() {
@@ -309,6 +411,200 @@ function updatePaletteSelectionUI() {
         if (s.dataset.color === selectedPinColor) s.classList.add('selected');
         else s.classList.remove('selected');
     });
+}
+
+// --- My Maps: load/create/delete/select user maps ---
+async function openMyMapsModal() {
+    if (!isOAuthUser) {
+        if (authModal) authModal.style.display = 'block';
+        else showToast('Please sign in (Google or GitHub) to manage your maps.');
+        return;
+    }
+    if (!myMapsModal) return;
+    myMapsModal.style.display = 'block';
+    await loadUserMaps();
+}
+
+async function loadUserMaps() {
+    const listEl = document.getElementById('my-maps-list');
+    const createInput = document.getElementById('new-map-name');
+    if (!listEl) return;
+    listEl.innerHTML = '<li style="color:#666;">Loading...</li>';
+    try {
+        // Query only maps owned by the current user (rules require this)
+        const q = query(collection(db, 'userMaps'), where('ownerId', '==', currentUserId));
+        const snap = await getDocs(q);
+        const docs = [];
+        snap.forEach((d) => { docs.push({ id: d.id, data: d.data() }); });
+        // sort by createdAt desc
+        docs.sort((a, b) => {
+            const ta = a.data.createdAt ? new Date(a.data.createdAt).getTime() : 0;
+            const tb = b.data.createdAt ? new Date(b.data.createdAt).getTime() : 0;
+            return tb - ta;
+        });
+        if (docs.length === 0) {
+            listEl.innerHTML = '<li style="color:#666;">No maps yet. Create one using the + button.</li>';
+        } else {
+            listEl.innerHTML = '';
+            docs.forEach((m) => {
+                const li = document.createElement('li');
+                li.style.display = 'flex';
+                li.style.justifyContent = 'space-between';
+                li.style.alignItems = 'center';
+                li.style.padding = '6px 4px';
+                li.style.borderBottom = '1px solid #eee';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = m.data.name || '(untitled)';
+                nameSpan.style.cursor = 'pointer';
+                nameSpan.addEventListener('click', () => {
+                    setActiveMap(m.id, m.data.name);
+                    // close modal after selection
+                    if (myMapsModal) myMapsModal.style.display = 'none';
+                });
+
+                const actions = document.createElement('span');
+                actions.style.display = 'flex';
+                actions.style.gap = '6px';
+
+                const selectIndicator = document.createElement('small');
+                selectIndicator.style.color = '#007AFF';
+                selectIndicator.style.marginRight = '6px';
+                if (activeMapId === m.id) {
+                    selectIndicator.textContent = 'Active';
+                    // ensure active map name is set so the status line can show it
+                    activeMapName = m.data.name || null;
+                    if (activeMapName) localStorage.setItem('activeMapName', activeMapName);
+                    updateLocationStatusDisplay();
+                }
+
+                const delBtn = document.createElement('button');
+                delBtn.textContent = 'Delete';
+                delBtn.style.background = '#FF3B30';
+                delBtn.style.color = 'white';
+                delBtn.style.border = 'none';
+                delBtn.style.padding = '4px 8px';
+                delBtn.style.borderRadius = '4px';
+                delBtn.addEventListener('click', async (ev) => {
+                    ev.stopPropagation();
+                    ev.preventDefault();
+                    await deleteUserMap(m.id, m.data.name);
+                });
+
+                actions.appendChild(selectIndicator);
+                actions.appendChild(delBtn);
+
+                li.appendChild(nameSpan);
+                li.appendChild(actions);
+                listEl.appendChild(li);
+            });
+        }
+        // update deactivate button visibility
+        updateDeactivateButtonVisibility();
+        // clear create input
+        if (createInput) createInput.value = '';
+    } catch (err) {
+        console.error('Failed to load user maps:', err);
+        listEl.innerHTML = '<li style="color:#c62828;">Failed to load maps.</li>';
+    }
+}
+
+function updateDeactivateButtonVisibility() {
+    const btn = document.getElementById('deactivate-map-button');
+    if (!btn) return;
+    if (activeMapId) {
+        btn.style.display = 'inline-block';
+        btn.style.background = '#FFCC00';
+        btn.style.color = '#000';
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+function deactivateActiveMap() {
+    if (!activeMapId) {
+        showToast('No active map to deactivate.');
+        return;
+    }
+    const ok = window.confirm('Deactivate the currently selected map?');
+    if (!ok) return;
+    activeMapId = null;
+    activeMapName = null;
+    localStorage.removeItem('activeMapId');
+    localStorage.removeItem('activeMapName');
+    updateDeactivateButtonVisibility();
+    updateLocationStatusDisplay();
+    showToast('Map deactivated');
+    // refresh list so 'Active' indicators update
+    if (myMapsModal && myMapsModal.style.display === 'block') loadUserMaps().catch(() => {});
+}
+
+async function createUserMap() {
+    if (!isOAuthUser) {
+        if (authModal) authModal.style.display = 'block';
+        else showToast('Please sign in (Google or GitHub) to create maps.');
+        return;
+    }
+    const input = document.getElementById('new-map-name');
+    if (!input) return;
+    const name = input.value.trim();
+    if (!name) { showToast('Enter a name for the map.'); return; }
+    if (name.length > 50) { showToast('Map name too long (50 char max).'); return; }
+    try {
+        // enforce max 5 maps
+    // count existing maps owned by the user using a filtered query
+    const countQ = query(collection(db, 'userMaps'), where('ownerId', '==', currentUserId));
+    const snap = await getDocs(countQ);
+    let count = snap.size;
+        if (count >= 5) { showToast('You have reached the 5-map limit. Delete an existing map to create a new one.'); return; }
+
+        await addDoc(collection(db, 'userMaps'), {
+            ownerId: currentUserId,
+            name,
+            createdAt: new Date()
+        });
+        showToast('Map created');
+        await loadUserMaps();
+    } catch (err) {
+        console.error('Failed to create map:', err);
+        showToast('Failed to create map: ' + (err.message || err));
+    }
+}
+
+async function deleteUserMap(mapId, mapName) {
+    if (!mapId) return;
+    const ok = window.confirm(`Delete map "${mapName || ''}"? This cannot be undone.`);
+    if (!ok) return;
+    try {
+        await deleteDoc(doc(db, 'userMaps', mapId));
+        showToast('Map deleted');
+        if (activeMapId === mapId) {
+            activeMapId = null;
+            activeMapName = null;
+            localStorage.removeItem('activeMapId');
+            localStorage.removeItem('activeMapName');
+            updateLocationStatusDisplay();
+        }
+        await loadUserMaps();
+    } catch (err) {
+        console.error('Failed to delete map:', err);
+        showToast('Failed to delete map: ' + (err.message || err));
+    }
+}
+
+function setActiveMap(mapId, mapName) {
+    activeMapId = mapId;
+    activeMapName = mapName || null;
+    if (mapId) {
+        localStorage.setItem('activeMapId', mapId);
+        if (activeMapName) localStorage.setItem('activeMapName', activeMapName);
+    } else {
+        localStorage.removeItem('activeMapId');
+        localStorage.removeItem('activeMapName');
+    }
+    updateLocationStatusDisplay();
+    showToast(mapName ? `Selected map: ${mapName}` : 'Map selected');
+    updateDeactivateButtonVisibility();
 }
 
 // small helper: return a divIcon for a pin colored with the provided color
@@ -430,7 +726,7 @@ function initSearch() {
                     li.addEventListener('click', () => {
                         searchInput.value = item.display_name;
                         map.setView([parseFloat(item.lat), parseFloat(item.lon)], 13);
-                        document.getElementById('location-status').textContent = `Showing: ${item.display_name}`;
+                        setLocationStatus(`Showing: ${item.display_name}`);
                         // Add temporary search marker with "Place a pin here" button
                         if (searchMarker) {
                             map.removeLayer(searchMarker); // Remove previous marker
@@ -444,35 +740,48 @@ function initSearch() {
                                 <button class="place-pin-button" data-lat="${lat}" data-lng="${lon}">Place a pin here</button>
                             `)
                             .openPopup();
-                        // Add event listener for the button
-                        setTimeout(() => { // Delay to ensure button is in DOM
-                            const placeButton = document.querySelector('.place-pin-button');
-                            if (placeButton) {
-                                placeButton.addEventListener('click', () => {
-                                    // Validate coordinates
-                                    if (!isValidLatLng(lat, lon)) {
-                                        showToast('Invalid location coordinates; cannot place pin.');
-                                        return;
+                        // Attach handler when popup opens so we operate on the popup DOM
+                        searchMarker.on('popupopen', () => {
+                            try {
+                                const popupEl = searchMarker.getPopup().getElement();
+                                if (popupEl) {
+                                    // Make sure clicks inside the popup don't propagate to the map
+                                    if (window.L && window.L.DomEvent && typeof window.L.DomEvent.disableClickPropagation === 'function') {
+                                        window.L.DomEvent.disableClickPropagation(popupEl);
                                     }
-                                    // If not signed in with Google, prompt and store pending lat/lng
-                                    if (!isGoogleUser) {
-                                        pendingLatLng = { lat, lng: lon };
-                                        if (authModal) authModal.style.display = 'block';
-                                        else showToast('Please sign in with Google to add pins.');
-                                        return;
+                                    const placeButton = popupEl.querySelector('.place-pin-button');
+                                    if (placeButton) {
+                                        placeButton.addEventListener('click', (ev) => {
+                                            ev.stopPropagation();
+                                            ev.preventDefault();
+                                            // Validate coordinates
+                                            if (!isValidLatLng(lat, lon)) {
+                                                showToast('Invalid location coordinates; cannot place pin.');
+                                                return;
+                                            }
+                                            // If not signed in with Google, prompt and store pending lat/lng
+                                            if (!isOAuthUser) {
+                                                pendingLatLng = { lat, lng: lon };
+                                                if (authModal) authModal.style.display = 'block';
+                                                else showToast('Please sign in (Google or GitHub) to add pins.');
+                                                return;
+                                            }
+                                            selectedLatLng = { lat, lng: lon };
+                                            document.getElementById('note-input').value = '';
+                                            selectedPinColor = selectedPinColor || '#008080';
+                                            updatePaletteSelectionUI();
+                                            pinModal.style.display = 'block';
+                                            if (searchMarker) {
+                                                map.removeLayer(searchMarker); // Remove temporary marker
+                                                searchMarker = null;
+                                            }
+                                        });
                                     }
-                                    selectedLatLng = { lat, lng: lon };
-                                    document.getElementById('note-input').value = '';
-                                    selectedPinColor = selectedPinColor || '#008080';
-                                    updatePaletteSelectionUI();
-                                    pinModal.style.display = 'block';
-                                    if (searchMarker) {
-                                        map.removeLayer(searchMarker); // Remove temporary marker
-                                        searchMarker = null;
-                                    }
-                                });
+                                }
+                            } catch (e) {
+                                console.error('Error attaching place-pin handler (autocomplete):', e);
                             }
-                        }, 100);
+                        });
                         autocompleteResults.style.display = 'none';
                         autocompleteResults.innerHTML = '';
                     });
@@ -504,7 +813,7 @@ async function performSearch(query) {
         if (data.length > 0) {
             const { lat, lon, display_name } = data[0];
             map.setView([parseFloat(lat), parseFloat(lon)], 13);
-            document.getElementById('location-status').textContent = `Showing: ${display_name}`;
+            setLocationStatus(`Showing: ${display_name}`);
             // Add temporary search marker with "Place a pin here" button
             if (searchMarker) {
                 map.removeLayer(searchMarker); // Remove previous marker
@@ -518,32 +827,45 @@ async function performSearch(query) {
                     <button class="place-pin-button" data-lat="${parsedLat}" data-lng="${parsedLon}">Place a pin here</button>
                 `)
                 .openPopup();
-            // Add event listener for the button
-            setTimeout(() => { // Delay to ensure button is in DOM
-                const placeButton = document.querySelector('.place-pin-button');
-                if (placeButton) {
-                    placeButton.addEventListener('click', () => {
-                        // Validate coordinates
-                        if (!isValidLatLng(parsedLat, parsedLon)) {
-                            showToast('Invalid location coordinates; cannot place pin.');
-                            return;
+            // Attach handler on popup open and disable click propagation so the
+            // button click is reliably handled (avoids popup closing before handler runs).
+            searchMarker.on('popupopen', () => {
+                try {
+                    const popupEl = searchMarker.getPopup().getElement();
+                    if (popupEl) {
+                        if (window.L && window.L.DomEvent && typeof window.L.DomEvent.disableClickPropagation === 'function') {
+                            window.L.DomEvent.disableClickPropagation(popupEl);
                         }
-                        if (!isGoogleUser) {
-                            pendingLatLng = { lat: parsedLat, lng: parsedLon };
-                            if (authModal) authModal.style.display = 'block';
-                            else showToast('Please sign in with Google to add or report pins.');
-                            return;
+                        const placeButton = popupEl.querySelector('.place-pin-button');
+                        if (placeButton) {
+                            placeButton.addEventListener('click', (ev) => {
+                                ev.stopPropagation();
+                                ev.preventDefault();
+                                // Validate coordinates
+                                if (!isValidLatLng(parsedLat, parsedLon)) {
+                                    showToast('Invalid location coordinates; cannot place pin.');
+                                    return;
+                                }
+                                if (!isOAuthUser) {
+                                    pendingLatLng = { lat: parsedLat, lng: parsedLon };
+                                    if (authModal) authModal.style.display = 'block';
+                                    else showToast('Please sign in (Google or GitHub) to add or report pins.');
+                                    return;
+                                }
+                                selectedLatLng = { lat: parsedLat, lng: parsedLon };
+                                document.getElementById('note-input').value = '';
+                                pinModal.style.display = 'block';
+                                if (searchMarker) {
+                                    map.removeLayer(searchMarker); // Remove temporary marker
+                                    searchMarker = null;
+                                }
+                            });
                         }
-                        selectedLatLng = { lat: parsedLat, lng: parsedLon };
-                        document.getElementById('note-input').value = '';
-                        pinModal.style.display = 'block';
-                        if (searchMarker) {
-                            map.removeLayer(searchMarker); // Remove temporary marker
-                            searchMarker = null;
-                        }
-                    });
+                    }
+                } catch (e) {
+                    console.error('Error attaching place-pin handler (search):', e);
                 }
-            }, 100);
+            });
         } else {
             showToast('Location not found. Try a different query.');
         }
@@ -573,8 +895,8 @@ function showToast(message) {
 
 // Toggle heart for a pin
 async function toggleHeart(pinId, currentCount, isHearted) {
-    if (!isGoogleUser) {
-        showToast('Please sign in with Google to like pins.');
+    if (!isOAuthUser) {
+        showToast('Please sign in (Google or GitHub) to like pins.');
         return;
     }
     if (!pinId || typeof pinId !== 'string' || pinId.trim() === '') {
@@ -627,8 +949,8 @@ async function toggleHeart(pinId, currentCount, isHearted) {
 
 // Toggle dislike for a pin (mirrors heart logic)
 async function toggleDislike(pinId, currentCount, isDisliked) {
-    if (!isGoogleUser) {
-        showToast('Please sign in with Google to dislike pins.');
+    if (!isOAuthUser) {
+        showToast('Please sign in (Google or GitHub) to dislike pins.');
         return;
     }
     if (!pinId || typeof pinId !== 'string' || pinId.trim() === '') {
@@ -682,8 +1004,8 @@ async function toggleDislike(pinId, currentCount, isDisliked) {
 // Save pin to Firestore
 async function savePin() {
     if (!selectedLatLng) return;
-    if (!isGoogleUser) {
-        showToast('Please sign in with Google to add pins.');
+    if (!isOAuthUser) {
+        showToast('Please sign in (Google or GitHub) to add pins.');
         return;
     }
 
@@ -699,11 +1021,16 @@ async function savePin() {
     if (note.length > 100) return; // Enforced by maxlength, but double-check
 
     try {
+        // Read expiry days from the modal slider (default to 7 days)
+        const expiryDays = parseInt(document.getElementById('expiry-slider')?.value || '7', 10);
+        const expiresAt = new Date(Date.now() + (expiryDays * 24 * 60 * 60 * 1000));
+
         const pinRef = await addDoc(collection(db, 'pins'), {
             lat: selectedLatLng.lat,
             lng: selectedLatLng.lng,
             note: note || '',
             timestamp: new Date(),
+            expiresAt: expiresAt,
             createdById: currentUserId || null,
             createdByFirstName: currentUserFirstName || null,
             color: selectedPinColor || '#008080'
@@ -747,6 +1074,20 @@ function loadPins() {
                 `;
                 const addedBy = data.createdByFirstName || 'Anonymous';
                 let addedAt = '';
+                // Compute expiry display
+                let expiryHtml = '';
+                try {
+                    if (data && data.expiresAt) {
+                        const exp = (typeof data.expiresAt.toDate === 'function') ? data.expiresAt.toDate() : new Date(data.expiresAt);
+                        const now = new Date();
+                        const msPerDay = 24 * 60 * 60 * 1000;
+                        const daysLeft = Math.ceil((exp - now) / msPerDay);
+                        if (daysLeft > 1) expiryHtml = `<small>Expires in: ${daysLeft} days</small><br>`;
+                        else if (daysLeft === 1) expiryHtml = `<small>Expires in: 1 day</small><br>`;
+                        else if (daysLeft === 0) expiryHtml = `<small>Expires today</small><br>`;
+                        else expiryHtml = `<small>Expired</small><br>`;
+                    }
+                } catch (e) { /* ignore expiry parse errors */ }
                 try {
                     if (data.timestamp && typeof data.timestamp.toDate === 'function') {
                         addedAt = data.timestamp.toDate().toLocaleString();
@@ -758,6 +1099,7 @@ function loadPins() {
                     ${data.note ? `<strong>${data.note}</strong><br>` : ''}
                     ${addedAt ? `<small>Added: ${addedAt}</small><br>` : ''}
                     <small>Added by: ${addedBy}</small><br>
+                    ${expiryHtml}
                     <div class="heart-section">${heartButtonHtml}</div>
                 `;
                 const popup = marker.bindPopup(popupContent);
@@ -830,7 +1172,7 @@ function loadPins() {
                                 e.stopPropagation();
                                 e.preventDefault();
                                 if (data.reported) { showToast('Report submitted.'); return; }
-                                if (!isGoogleUser) { if (authModal) authModal.style.display = 'block'; else showToast('Please sign in with Google to report pins.'); return; }
+                                if (!isOAuthUser) { if (authModal) authModal.style.display = 'block'; else showToast('Please sign in (Google or GitHub) to report pins.'); return; }
                                 const note = window.prompt('Optional: add a short reason for reporting (press Cancel to skip)');
                                 try { reportBtn.disabled = true; await reportPin(pinId, data, note || ''); showToast('Pin reported.'); }
                                 catch (err) { console.error('Report failed:', err); if (err && err.code && err.code.includes('permission')) { showToast('Reported — pending review (insufficient permissions to remove).'); } else { showToast('Failed to report pin: ' + (err.message || err)); } }
@@ -867,6 +1209,20 @@ function loadPins() {
                 `;
                 const addedBy = data.createdByFirstName || 'Anonymous';
                 let addedAt = '';
+                // Compute expiry display for reported pins as well
+                let expiryHtmlReported = '';
+                try {
+                    if (data && data.expiresAt) {
+                        const exp = (typeof data.expiresAt.toDate === 'function') ? data.expiresAt.toDate() : new Date(data.expiresAt);
+                        const now = new Date();
+                        const msPerDay = 24 * 60 * 60 * 1000;
+                        const daysLeft = Math.ceil((exp - now) / msPerDay);
+                        if (daysLeft > 1) expiryHtmlReported = `<small>Expires in: ${daysLeft} days</small><br>`;
+                        else if (daysLeft === 1) expiryHtmlReported = `<small>Expires in: 1 day</small><br>`;
+                        else if (daysLeft === 0) expiryHtmlReported = `<small>Expires today</small><br>`;
+                        else expiryHtmlReported = `<small>Expired</small><br>`;
+                    }
+                } catch (e) { /* ignore */ }
                 try {
                     if (data.timestamp && typeof data.timestamp.toDate === 'function') {
                         addedAt = data.timestamp.toDate().toLocaleString();
@@ -878,6 +1234,7 @@ function loadPins() {
                     ${data.note ? `<strong>${data.note}</strong><br>` : ''}
                     ${addedAt ? `<small>Added: ${addedAt}</small><br>` : ''}
                     <small>Added by: ${addedBy}</small><br>
+                    ${expiryHtmlReported}
                     <div class="heart-section">${heartButtonHtml}</div>
                 `;
                 marker.bindPopup(popupContent);
@@ -920,10 +1277,25 @@ function loadPins() {
         onSnapshot(collection(db, 'pins'), orderBy('timestamp', 'desc'), async (snapshot) => {
             const promises = [];
             snapshot.forEach((docSnapshot) => {
-                const pinId = docSnapshot.id;
-                const data = docSnapshot.data();
-                // Fetch both hearts and dislikes counts and whether current user has acted
-                const heartsPromise = getDocs(collection(db, 'pins', pinId, 'hearts'))
+                    const pinId = docSnapshot.id;
+                    const data = docSnapshot.data();
+                    // Skip expired pins (if expiresAt exists and is in the past)
+                    try {
+                        let expires = null;
+                        if (data && data.expiresAt) {
+                            if (typeof data.expiresAt.toDate === 'function') expires = data.expiresAt.toDate();
+                            else expires = new Date(data.expiresAt);
+                        }
+                        if (expires && expires <= new Date()) {
+                            // don't include this pin
+                            return;
+                        }
+                    } catch (e) {
+                        // ignore parse errors and continue
+                    }
+
+                    // Fetch both hearts and dislikes counts and whether current user has acted
+                    const heartsPromise = getDocs(collection(db, 'pins', pinId, 'hearts'))
                     .then((heartsSnapshot) => ({
                         heartCount: heartsSnapshot.size,
                         isHearted: heartsSnapshot.docs.some(d => d.id === currentUserId)
@@ -972,8 +1344,22 @@ function loadPins() {
         onSnapshot(collection(db, 'reported'), orderBy('reportedAt', 'desc'), async (snapshot) => {
             const reports = [];
             snapshot.forEach((docSnapshot) => {
-                reports.push({ reportId: docSnapshot.id, data: docSnapshot.data() });
-            });
+                    const data = docSnapshot.data();
+                    // Skip expired reported docs
+                    try {
+                        let expires = null;
+                        if (data && data.expiresAt) {
+                            if (typeof data.expiresAt.toDate === 'function') expires = data.expiresAt.toDate();
+                            else expires = new Date(data.expiresAt);
+                        }
+                        if (expires && expires <= new Date()) {
+                            return; // skip
+                        }
+                    } catch (e) {
+                        // ignore and include the report
+                    }
+                    reports.push({ reportId: docSnapshot.id, data });
+                });
             window._reportedCache = reports;
             renderAllMarkers();
         }, (error) => {

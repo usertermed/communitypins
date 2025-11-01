@@ -1,52 +1,103 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(ownerId) {
+      return isSignedIn() && request.auth.uid == ownerId;
+    }
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+    function validLatLng(lat, lng) {
+      return lat is number && lng is number
+        && lat >= -90 && lat <= 90
+        && lng >= -180 && lng <= 180;
+    }
+    function validColor(c) {
+      return c is string && c.matches('^#([A-Fa-f0-9]{6})$');
+    }
+    function validNote(n) {
+      return n is string && n.size() <= 100;
+    }
+    function withinSevenDays(ts) {
+      return ts is timestamp && ts >= request.time && ts <= request.time + duration.value(7, 'd');
+    }
+
+    // Pins collection
     match /pins/{pinId} {
+      // public reads
       allow read: if true;
-      allow create: if request.auth != null && request.resource.data.note.size() <= 100;
 
-  // Allow a minimal reporting update: authenticated users may set the
-  // 'reported' flag and attach a reportedRefId and reportedAt timestamp.
-  // Keep the rule simple and avoid unsupported function calls.
-  allow update: if request.auth != null
-        && resource.data.reported != true
-        && request.resource.data.reported == true
-        && request.resource.data.reportedRefId is string
-        && request.resource.data.reportedAt is timestamp;
+      // Create: must be signed in and provide valid data
+      allow create: if isSignedIn()
+        && request.resource.data.createdById == request.auth.uid
+        && validLatLng(request.resource.data.lat, request.resource.data.lng)
+        && (request.resource.data.note is string ? request.resource.data.note.size() <= 100 : true)
+        && (request.resource.data.color is string ? validColor(request.resource.data.color) : true)
+        && (request.resource.data.expiresAt is timestamp ? withinSevenDays(request.resource.data.expiresAt) : true)
+        && request.resource.data.timestamp is timestamp;
 
-  // Allow authenticated users to delete a pin (used when reporting).
-  // Note: this permits any authenticated user to delete pins; consider
-  // tightening this rule (e.g. require admin claim) if needed.
-  allow delete: if request.auth != null;
+      // Update: allow reporting (setting reported=true with metadata) OR allow limited owner updates
+      allow update: if isSignedIn() && (
+        // reporting flow: mark reported only once and include reported metadata
+        (resource.data.reported != true
+          && request.resource.data.reported == true
+          && request.resource.data.reportedRefId is string
+          && request.resource.data.reportedAt is timestamp)
+        // owner may update non-location fields (note, color) but not change lat/lng or createdById
+        || (request.auth.uid == resource.data.createdById
+            && request.resource.data.createdById == resource.data.createdById
+            && request.resource.data.lat == resource.data.lat
+            && request.resource.data.lng == resource.data.lng
+            && (request.resource.data.note is string ? request.resource.data.note.size() <= 100 : true)
+            && (request.resource.data.color is string ? validColor(request.resource.data.color) : true)
+        )
+      );
+
+      // Delete: only the owner or an admin may delete a pin
+      allow delete: if isSignedIn() && (isOwner(resource.data.createdById) || isAdmin());
 
       match /hearts/{userId} {
         allow read: if true;
-        allow create, delete: if request.auth != null && request.auth.uid == userId;
+        allow create, delete: if isSignedIn() && request.auth.uid == userId;
       }
       match /dislikes/{userId} {
         allow read: if true;
-        allow create, delete: if request.auth != null && request.auth.uid == userId;
+        allow create, delete: if isSignedIn() && request.auth.uid == userId;
       }
     }
 
+    // Reported collection (read-only after create)
     match /reported/{reportId} {
       allow read: if true;
-      // Allow authenticated users to create reported docs. Basic validation: must reference an originalId
-  allow create: if request.auth != null
+      allow create: if isSignedIn()
         && request.resource.data.originalId is string
-        && (request.resource.data.reportNote is string || !request.resource.data.keys().hasAny(['reportNote']));
-      // Prevent client-side updates/deletes to reported documents
+        && (request.resource.data.reportNote is string || !request.resource.data.keys().hasAny(['reportNote']))
+        && request.resource.data.reportedAt is timestamp;
       allow update, delete: if false;
     }
-    
-    // Generic rules for any 'dislikes' subcollection anywhere in the database.
-    // This lets collectionGroup queries on 'dislikes' succeed even if dislikes
-    // exist under other parent collections (for example if migrated or if
-    // reported items later get a dislikes subcollection). Keeps the same
-    // per-user create/delete restriction as the more specific rule above.
+
+    // User maps collection: owned by a user
+    match /userMaps/{mapId} {
+      // only the owner may read/edit/delete their maps
+      allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 50
+        && request.resource.data.createdAt is timestamp;
+      allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow update: if false;
+    }
+
+    // Generic dislikes subcollections (collectionGroup support)
     match /{path=**}/dislikes/{userId} {
       allow read: if true;
-      allow create, delete: if request.auth != null && request.auth.uid == userId;
+      allow create, delete: if isSignedIn() && request.auth.uid == userId;
     }
   }
 }
