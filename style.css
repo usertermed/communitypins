@@ -87,7 +87,7 @@ body {
     border: none;
     border-radius: 6px; /* increased from 4px */
     cursor: pointer;
-    min-width: 100px;
+    min-width: 20px;
 }
 
 #center-button:hover, #auth-button:hover, #my-maps-button:hover, #how-to-use-button:hover, #about-button:hover {
@@ -321,15 +321,34 @@ body {
         padding: 10px;
     }
 
+    /* Make the header a single horizontal, touch-scrollable row on small screens
+       so it doesn't take excessive vertical space. Buttons remain large enough
+       for touch and won't wrap to a new line. */
     #menu-container {
-        flex-direction: column;
-        gap: 5px;
+        flex-direction: row;
+        gap: 8px;
+        /* horizontal scrolling for overflowed controls */
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-wrap: nowrap;
+        /* keep the menu near the top and easily reachable */
+        position: sticky;
+        top: 6px;
+        z-index: 900;
+        background: rgba(255,255,255,0.96);
+        padding: 8px;
+        border-radius: 10px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.06);
     }
 
+    /* Keep header buttons from stretching vertically; make each an inline-flex
+       element with a comfortable minimum width for touch targets. */
     #center-button, #auth-button, #my-maps-button, #how-to-use-button, #about-button {
-        width: 100%;
-        padding: 12px;
+        flex: 0 0 auto;
+        min-width: 64px;
+        padding: 10px 12px;
         font-size: 14px;
+        white-space: nowrap; /* prevent button text wrapping */
     }
 
     #location-status {
@@ -346,8 +365,9 @@ body {
         min-height: 200px;
     }
 
+    /* Move autocomplete down so it's below the sticky header row */
     #autocomplete-results {
-        top: 110px;
+        top: 72px;
         max-height: 150px;
     }
 }

@@ -127,9 +127,9 @@ function updateAuthUI() {
     if (!authButton) return;
     const user = auth.currentUser;
     if (user) {
-        const provider = isGoogleUser ? 'Google' : (isGithubUser ? 'GitHub' : 'Account');
-        const namePart = currentUserFirstName ? ` (${currentUserFirstName})` : '';
-        authButton.textContent = `Sign out (${provider})${namePart}`;
+        const provider = isGoogleUser ? '<i class="fa-brands fa-google" style="color: #ffffff;"></i>' : (isGithubUser ? '<i class="fa-brands fa-github" style="color: #ffffff;"></i>' : 'Account');
+        const namePart = currentUserFirstName ? ` ${currentUserFirstName}` : '';
+        authButton.innerHTML = `${provider} ${namePart}`;
     } else {
         authButton.textContent = 'Sign in';
     }
@@ -138,7 +138,7 @@ function updateAuthUI() {
 // Called when user clicks the auth button
 async function handleAuthButtonClick() {
     const user = auth.currentUser;
-    // If already signed in with Google, sign out
+    // If already signed in, sign out
     if (user) {
         try {
             await signOut(auth);
