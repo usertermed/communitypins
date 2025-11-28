@@ -361,6 +361,8 @@ function initModals() {
             window.history.replaceState({}, document.title, window.location.pathname);
             
             showToast('Viewing public Community Pins map');
+
+            window.location.reload();
         });
     }
 
@@ -628,8 +630,11 @@ function updateSharedMapUI() {
     const authButton = document.getElementById('auth-button');
     const howToButton = document.getElementById('how-to-use-button');
     const aboutButton = document.getElementById('about-button');
-    
+    const centerButton = document.getElementById('center-button');
+
     if (isViewingSharedMap) {
+        // Set location status
+        setLocationStatus('Viewing a publically shared map');
         // Show shared map header
         if (sharedMapHeader) sharedMapHeader.style.display = 'block';
         
@@ -641,6 +646,7 @@ function updateSharedMapUI() {
         if (authButton) authButton.style.display = 'none';
         if (howToButton) howToButton.style.display = 'none';
         if (aboutButton) aboutButton.style.display = 'none';
+        if (centerButton) centerButton.style.display = 'none';
     } else {
         // Hide shared map header
         if (sharedMapHeader) sharedMapHeader.style.display = 'none';
