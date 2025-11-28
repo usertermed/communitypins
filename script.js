@@ -235,6 +235,14 @@ async function handleAuthButtonClick() {
 }
 
 // Get user location (try browser geolocation first, fall back to IP geolocation)
+// Show geolocation error status bar
+function showGeolocationErrorBar() {
+    const geoBar = document.getElementById('geolocation-error-bar');
+    if (geoBar) {
+        geoBar.style.display = 'flex';
+    }
+}
+
 async function getUserLocation() {
     // helper to wrap navigator.geolocation in a promise with timeout
     const getBrowserLocation = (timeout = 10000) => {
@@ -272,6 +280,9 @@ async function getUserLocation() {
     setLocationStatus(`Centered on your current location.`);
     } catch (geoError) {
         console.warn('Browser geolocation failed or denied:', geoError);
+        
+        // Show geolocation error bar
+        showGeolocationErrorBar();
 
         // fallback to IP lookup
         try {
@@ -408,6 +419,15 @@ function initModals() {
             showToast('Viewing public Community Pins map');
 
             window.location.reload();
+        });
+    }
+
+    // Geolocation error bar dismiss button
+    const dismissGeoButton = document.getElementById('dismiss-geolocation-error');
+    if (dismissGeoButton) {
+        dismissGeoButton.addEventListener('click', () => {
+            const geoBar = document.getElementById('geolocation-error-bar');
+            if (geoBar) geoBar.style.display = 'none';
         });
     }
 
