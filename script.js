@@ -40,6 +40,12 @@ let selectedPinColor = '#008080'; // default pin color
 let myMapsModal = null; // modal for My Maps
 let activeMapId = localStorage.getItem('activeMapId') || null; // currently selected map
 let activeMapName = localStorage.getItem('activeMapName') || null; // optional persisted map name
+// Firestore listener unsubscribe handles so we can re-query when map changes
+let pinsUnsubscribe = null;
+let reportedUnsubscribe = null;
+let dislikesUnsubscribe = null;
+// Poll handle fallback for dislikes polling
+let dislikesPollHandle = null;
 let currentLocationStatus = ''; // base location/status text (search/center messages)
 
 function setLocationStatus(text) {
@@ -70,6 +76,7 @@ function isValidLatLng(lat, lng) {
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
+    console.log('App: DOMContentLoaded');
     // Keep UI in sync with auth state (handles Google sign-in and sign-out)
     onAuthStateChanged(auth, (user) => {
         if (user) {
@@ -230,7 +237,16 @@ async function getUserLocation() {
 
 // Initialize Leaflet map with OpenStreetMap tiles
 function initMap() {
-    map = window.L.map('map').setView([currentLat || 37.7749, currentLng || -122.4194], 13);
+    try {
+        console.log('App: initializing Leaflet map element #map with coords', currentLat, currentLng);
+        map = window.L.map('map').setView([currentLat || 37.7749, currentLng || -122.4194], 13);
+    } catch (err) {
+        console.error('App: failed to initialize map:', err);
+        // Surface a visible message in the UI so the user sees something
+        const status = document.getElementById('location-status');
+        if (status) status.textContent = 'Map failed to initialize — check console for errors.';
+        return;
+    }
 
     // Add OpenStreetMap tile layer
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -431,16 +447,27 @@ async function loadUserMaps() {
     if (!listEl) return;
     listEl.innerHTML = '<li style="color:#666;">Loading...</li>';
     try {
+        console.log('loadUserMaps: currentUserId=', currentUserId, 'isOAuthUser=', isOAuthUser);
         // Query only maps owned by the current user (rules require this)
         const q = query(collection(db, 'userMaps'), where('ownerId', '==', currentUserId));
         const snap = await getDocs(q);
         const docs = [];
         snap.forEach((d) => { docs.push({ id: d.id, data: d.data() }); });
-        // sort by createdAt desc
+        // sort by createdAt desc (handle Firestore Timestamps and JS Dates)
         docs.sort((a, b) => {
-            const ta = a.data.createdAt ? new Date(a.data.createdAt).getTime() : 0;
-            const tb = b.data.createdAt ? new Date(b.data.createdAt).getTime() : 0;
-            return tb - ta;
+            const toMillis = (val) => {
+                if (!val) return 0;
+                try {
+                    if (typeof val.toDate === 'function') return val.toDate().getTime();
+                    if (val instanceof Date) return val.getTime();
+                    const n = Number(val);
+                    if (!isNaN(n)) return n;
+                } catch (e) {
+                    // fallback
+                }
+                return 0;
+            };
+            return toMillis(b.data.createdAt) - toMillis(a.data.createdAt);
         });
         if (docs.length === 0) {
             listEl.innerHTML = '<li style="color:#666;">No maps yet. Create one using the + button.</li>';
@@ -537,6 +564,8 @@ function deactivateActiveMap() {
     showToast('Map deactivated');
     // refresh list so 'Active' indicators update
     if (myMapsModal && myMapsModal.style.display === 'block') loadUserMaps().catch(() => {});
+    // reload pins so we return to the public feed
+    try { loadPins(); } catch (e) { console.warn('Failed to reload pins after deactivation:', e); }
 }
 
 async function createUserMap() {
@@ -584,6 +613,8 @@ async function deleteUserMap(mapId, mapName) {
             localStorage.removeItem('activeMapId');
             localStorage.removeItem('activeMapName');
             updateLocationStatusDisplay();
+            // reload pins since active map was deleted
+            try { loadPins(); } catch (e) { console.warn('Failed to reload pins after map deletion:', e); }
         }
         await loadUserMaps();
     } catch (err) {
@@ -605,6 +636,8 @@ function setActiveMap(mapId, mapName) {
     updateLocationStatusDisplay();
     showToast(mapName ? `Selected map: ${mapName}` : 'Map selected');
     updateDeactivateButtonVisibility();
+    // Re-load pins to reflect the selected map (unsubscribe/resubscribe)
+    try { loadPins(); } catch (e) { console.warn('Failed to reload pins after setActiveMap:', e); }
 }
 
 // small helper: return a divIcon for a pin colored with the provided color
@@ -1030,6 +1063,8 @@ async function savePin() {
             lng: selectedLatLng.lng,
             note: note || '',
             timestamp: new Date(),
+            // associate pin with currently active map if any
+            mapId: activeMapId || null,
             expiresAt: expiresAt,
             createdById: currentUserId || null,
             createdByFirstName: currentUserFirstName || null,
@@ -1046,9 +1081,15 @@ async function savePin() {
 
 // Load and display pins (real-time listener)
 function loadPins() {
-        // Maintain in-memory caches for pins and reported docs and render them together
-        window._pinsCache = [];
-        window._reportedCache = [];
+    // If we already have active listeners, unsubscribe them so we can re-query
+    try { if (pinsUnsubscribe) { pinsUnsubscribe(); pinsUnsubscribe = null; } } catch (e) { console.warn('Error unsubscribing pins listener:', e); }
+    try { if (reportedUnsubscribe) { reportedUnsubscribe(); reportedUnsubscribe = null; } } catch (e) { console.warn('Error unsubscribing reported listener:', e); }
+    try { if (dislikesUnsubscribe) { dislikesUnsubscribe(); dislikesUnsubscribe = null; } } catch (e) { console.warn('Error unsubscribing dislikes listener:', e); }
+    try { if (dislikesPollHandle) { clearInterval(dislikesPollHandle); dislikesPollHandle = null; } } catch (e) { /* ignore */ }
+
+    // Maintain in-memory caches for pins and reported docs and render them together
+    window._pinsCache = [];
+    window._reportedCache = [];
 
         // Helper to render both caches into a single marker layer so reported and
         // non-reported pins look identical.
@@ -1062,6 +1103,12 @@ function loadPins() {
             // Render normal pins (skip those marked reported)
             window._pinsCache.forEach(({ pinId, data, heartCount, isHearted, dislikeCount, isDisliked }) => {
                 if (data.reported) return; // skip reported ones
+                
+                // When viewing public (no active map), skip pins that belong to a private map
+                if (!activeMapId && data.mapId) {
+                    return; // skip private map pins when in public view
+                }
+                
                 const marker = window.L.marker([data.lat, data.lng], { icon: getPinIcon(data.color || '#008080') }).addTo(window.markerLayer);
                 const heartButtonHtml = `
                     <button class="heart-button" data-pin-id="${pinId}" data-hearted="${isHearted}">
@@ -1196,6 +1243,11 @@ function loadPins() {
 
             // Render reported docs (show them identical to normal pins)
             window._reportedCache.forEach(({ reportId, data }) => {
+                // When viewing public (no active map), skip reported pins that belong to a private map
+                if (!activeMapId && data.mapId) {
+                    return; // skip private map reported pins when in public view
+                }
+                
                 const marker = window.L.marker([data.lat, data.lng], { icon: getPinIcon(data.color || '#008080') }).addTo(window.markerLayer);
                 // For reported docs we render reaction buttons but disable them to avoid
                 // attempting writes to /pins/{reportId}/... which would be incorrect and
@@ -1273,8 +1325,23 @@ function loadPins() {
             });
         }
 
-        // Listen for regular pins
-        onSnapshot(collection(db, 'pins'), orderBy('timestamp', 'desc'), async (snapshot) => {
+        // Listen for regular pins (filter by active map if set)
+        let pinsQuery = null;
+        try {
+            if (activeMapId) {
+                // Private map: show only pins with matching mapId
+                pinsQuery = query(collection(db, 'pins'), where('mapId', '==', activeMapId), orderBy('timestamp', 'desc'));
+            } else {
+                // Public (no active map): show all pins (will filter client-side to exclude private maps)
+                // Note: we query all pins because existing pins may not have a mapId field, and Firestore doesn't support OR in where()
+                pinsQuery = query(collection(db, 'pins'), orderBy('timestamp', 'desc'));
+            }
+        } catch (e) {
+            console.warn('Could not construct pins query, falling back to unfiltered:', e);
+            pinsQuery = query(collection(db, 'pins'), orderBy('timestamp', 'desc'));
+        }
+
+    pinsUnsubscribe = onSnapshot(pinsQuery, async (snapshot) => {
             const promises = [];
             snapshot.forEach((docSnapshot) => {
                     const pinId = docSnapshot.id;
@@ -1337,11 +1404,66 @@ function loadPins() {
             }
         }, (error) => {
             console.error('Snapshot error:', error);
-            showToast('Failed to load pins: ' + error.message);
+            // If Firestore requires a composite index, the error message contains
+            // a console-link the user can click to create it. Extract and surface it.
+            try {
+                const msg = (error && error.message) ? error.message : String(error);
+                const urlMatch = msg.match(/https?:\/\/[^\s)]+/);
+                if (msg.includes('requires an index') && urlMatch) {
+                    console.warn('Firestore index required for pins query. Create it here:', urlMatch[0]);
+                    showToast('Pins query requires a Firestore index. See console for a direct link to create it.');
+                    // Fallback: re-run the query without orderBy so results still load (less stable ordering)
+                    try {
+                        const fallbackQuery = activeMapId ? query(collection(db, 'pins'), where('mapId', '==', activeMapId)) : query(collection(db, 'pins'));
+                        if (pinsUnsubscribe) { pinsUnsubscribe(); }
+                        pinsUnsubscribe = onSnapshot(fallbackQuery, async (snapshot) => {
+                            const promises = [];
+                            snapshot.forEach((docSnapshot) => {
+                                const pinId = docSnapshot.id;
+                                const data = docSnapshot.data();
+                                // Skip expired pins (if expiresAt exists and is in the past)
+                                try {
+                                    let expires = null;
+                                    if (data && data.expiresAt) {
+                                        if (typeof data.expiresAt.toDate === 'function') expires = data.expiresAt.toDate();
+                                        else expires = new Date(data.expiresAt);
+                                    }
+                                    if (expires && expires <= new Date()) {
+                                        // don't include this pin
+                                        return;
+                                    }
+                                } catch (e) { /* ignore */ }
+                                const heartsPromise = getDocs(collection(db, 'pins', pinId, 'hearts'))
+                                .then((heartsSnapshot) => ({
+                                    heartCount: heartsSnapshot.size,
+                                    isHearted: heartsSnapshot.docs.some(d => d.id === currentUserId)
+                                }))
+                                .catch((error) => { console.error('Error fetching hearts for pin', pinId, ':', error); return { heartCount: 0, isHearted: false }; });
+                                const dislikesPromise = getDocs(collection(db, 'pins', pinId, 'dislikes'))
+                                .then((dislikesSnapshot) => ({
+                                    dislikeCount: dislikesSnapshot.size,
+                                    isDisliked: dislikesSnapshot.docs.some(d => d.id === currentUserId)
+                                }))
+                                .catch((error) => { console.error('Error fetching dislikes for pin', pinId, ':', error); return { dislikeCount: 0, isDisliked: false }; });
+                                promises.push(Promise.all([heartsPromise, dislikesPromise]).then(([h, d]) => ({ pinId, data, heartCount: h.heartCount, isHearted: h.isHearted, dislikeCount: d.dislikeCount, isDisliked: d.isDisliked })));
+                            });
+                            try { const pinInfos = await Promise.all(promises); window._pinsCache = pinInfos; renderAllMarkers(); } catch (err2) { console.error('Error loading pins (fallback):', err2); }
+                        }, (err2) => { console.error('Fallback pins snapshot error:', err2); showToast('Failed to load pins: ' + (err2 && err2.message ? err2.message : err2)); });
+                    } catch (fbErr) { console.error('Failed to attach fallback pins listener:', fbErr); }
+                    return;
+                }
+            } catch (e) { /* parsing errors ignored */ }
+            showToast('Failed to load pins: ' + (error && error.message ? error.message : String(error)));
         });
 
-        // Listen for reported pins and update cache
-        onSnapshot(collection(db, 'reported'), orderBy('reportedAt', 'desc'), async (snapshot) => {
+        // Listen for reported pins and update cache (respect active map if set)
+        let reportedQuery = null;
+        try {
+            if (activeMapId) reportedQuery = query(collection(db, 'reported'), where('mapId', '==', activeMapId), orderBy('reportedAt', 'desc'));
+            else reportedQuery = query(collection(db, 'reported'), orderBy('reportedAt', 'desc'));
+        } catch (e) { reportedQuery = query(collection(db, 'reported'), orderBy('reportedAt', 'desc')); }
+
+        reportedUnsubscribe = onSnapshot(reportedQuery, async (snapshot) => {
             const reports = [];
             snapshot.forEach((docSnapshot) => {
                     const data = docSnapshot.data();
@@ -1364,13 +1486,44 @@ function loadPins() {
             renderAllMarkers();
         }, (error) => {
             console.error('Reported snapshot error:', error);
+            try {
+                const msg = (error && error.message) ? error.message : String(error);
+                const urlMatch = msg.match(/https?:\/\/[^\s)]+/);
+                if (msg.includes('requires an index') && urlMatch) {
+                    console.warn('Firestore index required for reported query. Create it here:', urlMatch[0]);
+                    showToast('Reported query requires a Firestore index. See console for a direct link to create it.');
+                    // Fallback: re-run the query without orderBy so results still load
+                    try {
+                        const fallbackReportedQuery = activeMapId ? query(collection(db, 'reported'), where('mapId', '==', activeMapId)) : query(collection(db, 'reported'));
+                        if (reportedUnsubscribe) { reportedUnsubscribe(); }
+                        reportedUnsubscribe = onSnapshot(fallbackReportedQuery, async (snapshot) => {
+                            const reports = [];
+                            snapshot.forEach((docSnapshot) => {
+                                const data = docSnapshot.data();
+                                try {
+                                    let expires = null;
+                                    if (data && data.expiresAt) {
+                                        if (typeof data.expiresAt.toDate === 'function') expires = data.expiresAt.toDate();
+                                        else expires = new Date(data.expiresAt);
+                                    }
+                                    if (expires && expires <= new Date()) return;
+                                } catch (e) {}
+                                reports.push({ reportId: docSnapshot.id, data });
+                            });
+                            window._reportedCache = reports;
+                            renderAllMarkers();
+                        }, (err2) => { console.error('Fallback reported snapshot error:', err2); });
+                    } catch (fbErr) { console.error('Failed to attach fallback reported listener:', fbErr); }
+                    return;
+                }
+            } catch (e) {}
         });
 
         // Listen for changes to any dislike documents across the database so counts
         // update in near real-time without requiring a full page refresh.
         // We use collectionGroup('dislikes') to watch all dislikes under pins/{pinId}/dislikes.
         try {
-            onSnapshot(collectionGroup(db, 'dislikes'), (snap) => {
+            dislikesUnsubscribe = onSnapshot(collectionGroup(db, 'dislikes'), (snap) => {
                 // Build a map of pinId => { count, isDislikedForCurrentUser }
                 const counts = {}; // pinId -> { count, isDisliked }
                 snap.forEach((d) => {
@@ -1411,12 +1564,11 @@ function loadPins() {
         }
 
         // Polling fallback state
-        let _dislikesPollHandle = null;
         function startDislikesPolling() {
-            if (_dislikesPollHandle) return; // already polling
+            if (dislikesPollHandle) return; // already polling
             // immediate fetch once
             fetchAllDislikeCountsForPins().catch(e => console.warn('Initial dislike fetch failed:', e));
-            _dislikesPollHandle = setInterval(() => {
+            dislikesPollHandle = setInterval(() => {
                 fetchAllDislikeCountsForPins().catch(e => console.warn('Periodic dislike fetch failed:', e));
             }, 15000);
         }
