@@ -10,6 +10,11 @@
 </head>
 <body>
     <div class="container">
+        <!-- Shared map header (shown only when viewing a shared map) -->
+        <div id="shared-map-header" style="display:none; background:#f0f0f0; border-bottom:2px solid #ddd; padding:12px; text-align:center;">
+            <p style="margin:0 0 8px 0; font-size:14px; color:#555;"><strong>Viewing a Shared Map</strong></p>
+            <button id="try-community-pins-button" style="background:#008080; color:#fff; border:none; padding:8px 16px; border-radius:6px; font-size:14px; cursor:pointer;">Try Community Pins</button>
+        </div>
         <div id="search-container">
             <input type="text" id="search-input" placeholder="Search"><button id="search-button">Search</button>
             <ul id="autocomplete-results"></ul>
@@ -34,7 +39,7 @@
                 <!-- color swatches will be populated by JS or can be static --></div>
             <p style="margin:6px 0 0 0; font-size:13px; color:#555;">Choose a color for your pin</p>
             <textarea id="note-input" placeholder="Add a note (max 100 characters)" maxlength="100"></textarea>
-            <div style="margin:8px 0; font-size:13px; color:#555;">
+            <div id="expiry-slider-container" style="margin:8px 0; font-size:13px; color:#555;">
                 <label for="expiry-slider">Expire pin after <span id="expiry-display">7</span> day(s)</label>
                 <input id="expiry-slider" type="range" min="1" max="7" step="1" value="7" aria-label="Pin expiry in days">
             </div>
@@ -80,6 +85,14 @@
                     <button id="deactivate-map-button" style="background:#ccc;">Deactivate</button>
                 </div>
                 <p style="font-size:12px; color:#888; margin-top:8px;">Create and manage your personal maps here.</p>
+                <!-- Share link section -->
+                <div id="share-link-section" style="display:none; margin-top:12px; padding:8px; background:#f5f5f5; border-radius:4px;">
+                    <p style="margin:0 0 6px 0; font-size:12px; color:#555;"><strong>Share this map:</strong></p>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input id="share-link-input" type="text" readonly style="flex:1; padding:6px; font-size:12px; background:#fff; border:1px solid #ccc; border-radius:4px;" />
+                        <button id="copy-share-link-button" style="padding:6px 12px; font-size:12px; background:#007AFF; color:#fff; border:none; border-radius:4px; cursor:pointer;">Copy</button>
+                    </div>
+                </div>
             </div>
         </div>
 

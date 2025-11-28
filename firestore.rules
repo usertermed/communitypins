@@ -26,6 +26,11 @@ service cloud.firestore {
     function withinSevenDays(ts) {
       return ts is timestamp && ts >= request.time && ts <= request.time + duration.value(7, 'd');
     }
+    function validExpiresAt(ts, hasMapId) {
+      // If pin is on a private map (hasMapId=true), expiresAt can be any timestamp (pins don't expire on private maps)
+      // If pin is on public (hasMapId=false), expiresAt must be within 7 days or null
+      return hasMapId ? (ts is timestamp) : (!ts.exists() || (ts is timestamp && withinSevenDays(ts)));
+    }
 
     // Pins collection
     match /pins/{pinId} {
@@ -38,7 +43,7 @@ service cloud.firestore {
         && validLatLng(request.resource.data.lat, request.resource.data.lng)
         && (request.resource.data.note is string ? request.resource.data.note.size() <= 100 : true)
         && (request.resource.data.color is string ? validColor(request.resource.data.color) : true)
-        && (request.resource.data.expiresAt is timestamp ? withinSevenDays(request.resource.data.expiresAt) : true)
+        && validExpiresAt(request.resource.data.expiresAt, request.resource.data.mapId != null)
         && request.resource.data.timestamp is timestamp;
 
       // Update: allow reporting (setting reported=true with metadata) OR allow limited owner updates
@@ -77,21 +82,32 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.originalId is string
         && (request.resource.data.reportNote is string || !request.resource.data.keys().hasAny(['reportNote']))
-        && request.resource.data.reportedAt is timestamp;
+        && request.resource.data.reportedAt is timestamp
+        && (request.resource.data.expiresAt is timestamp ? true : true);
       allow update, delete: if false;
     }
 
     // User maps collection: owned by a user
     match /userMaps/{mapId} {
-      // only the owner may read/edit/delete their maps
-      allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      // Allow anyone to read if:
+      // 1. User is signed in and owns the map, OR
+      // 2. Map is explicitly marked as shared (isShared field exists and is true)
+      function isSharedMap() {
+        return resource.data.isShared == true;
+      }
+      
+      allow read: if (isSignedIn() && resource.data.ownerId == request.auth.uid) || isSharedMap();
+      
       allow create: if isSignedIn()
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.name is string
         && request.resource.data.name.size() <= 50
         && request.resource.data.createdAt is timestamp;
+      
       allow delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow update: if false;
+      
+      // Allow owner to update any field (including isShared for sharing functionality)
+      allow update: if isSignedIn() && resource.data.ownerId == request.auth.uid;
     }
 
     // Generic dislikes subcollections (collectionGroup support)

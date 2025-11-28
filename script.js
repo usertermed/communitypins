@@ -1,7 +1,7 @@
 // Import Firebase modules
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-app.js';
 import { getAuth, GoogleAuthProvider, GithubAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-auth.js';
-import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc, collectionGroup, query, where } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
+import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, onSnapshot, orderBy, setDoc, updateDoc, collectionGroup, query, where, getDoc } from 'https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore.js';
 
 // Firebase
 const firebaseConfig = {
@@ -40,6 +40,7 @@ let selectedPinColor = '#008080'; // default pin color
 let myMapsModal = null; // modal for My Maps
 let activeMapId = localStorage.getItem('activeMapId') || null; // currently selected map
 let activeMapName = localStorage.getItem('activeMapName') || null; // optional persisted map name
+let isViewingSharedMap = false; // track if currently viewing a shared map
 // Firestore listener unsubscribe handles so we can re-query when map changes
 let pinsUnsubscribe = null;
 let reportedUnsubscribe = null;
@@ -77,6 +78,16 @@ function isValidLatLng(lat, lng) {
 // Initialize app
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('App: DOMContentLoaded');
+    
+    // Check if user is viewing a shared map (query param ?shareMap=mapId)
+    const urlParams = new URLSearchParams(window.location.search);
+    const sharedMapId = urlParams.get('shareMap');
+    if (sharedMapId) {
+        console.log('Shared map requested:', sharedMapId);
+        // Store for later processing after auth state is determined
+        window._pendingSharedMapId = sharedMapId;
+    }
+    
     // Keep UI in sync with auth state (handles Google sign-in and sign-out)
     onAuthStateChanged(auth, (user) => {
         if (user) {
@@ -87,12 +98,30 @@ document.addEventListener('DOMContentLoaded', async () => {
             isGoogleUser = user.providerData && user.providerData.some(p => p.providerId === 'google.com');
             isGithubUser = user.providerData && user.providerData.some(p => p.providerId === 'github.com');
             isOAuthUser = !!(isGoogleUser || isGithubUser);
+            
+            console.log('Auth state: user signed in', { currentUserId, isOAuthUser, pendingSharedMapId: window._pendingSharedMapId });
+            
+            // If there's a pending shared map, load it now that user is signed in
+            if (window._pendingSharedMapId) {
+                console.log('Loading pending shared map:', window._pendingSharedMapId);
+                loadSharedMap(window._pendingSharedMapId);
+                window._pendingSharedMapId = null;
+            }
         } else {
             currentUserId = null;
             currentUserFirstName = null;
             isGoogleUser = false;
             isGithubUser = false;
             isOAuthUser = false;
+            
+            console.log('Auth state: user signed out', { pendingSharedMapId: window._pendingSharedMapId });
+            
+            // If user is not signed in but there's a pending shared map, load it anyway (shared maps don't require auth)
+            if (window._pendingSharedMapId) {
+                console.log('Loading pending shared map (no auth required):', window._pendingSharedMapId);
+                loadSharedMap(window._pendingSharedMapId);
+                window._pendingSharedMapId = null;
+            }
         }
         updateAuthUI();
     // If the user just signed in with any supported provider and they had a pending location, open pin modal
@@ -311,6 +340,30 @@ function initModals() {
         await getUserLocation();
     };
 
+    // Try Community Pins button (shared map header)
+    const tryPinsButton = document.getElementById('try-community-pins-button');
+    if (tryPinsButton) {
+        tryPinsButton.addEventListener('click', () => {
+            // Clear shared map state and return to public map
+            isViewingSharedMap = false;
+            activeMapId = null;
+            activeMapName = null;
+            localStorage.removeItem('activeMapId');
+            localStorage.removeItem('activeMapName');
+            
+            // Update UI and reload
+            updateSharedMapUI();
+            updateLocationStatusDisplay();
+            try { loadPins(); } catch (e) { console.warn('Failed to reload pins:', e); }
+            try { if (window._updateExpiryVisibility) window._updateExpiryVisibility(); } catch (e) {}
+            
+            // Remove query params from URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+            
+            showToast('Viewing public Community Pins map');
+        });
+    }
+
     // Auth button (sign-in / sign-out)
     const authButton = document.getElementById('auth-button');
     if (authButton) {
@@ -413,11 +466,19 @@ function initModals() {
     // Expiry slider in pin modal (1-7 days)
     const expirySlider = document.getElementById('expiry-slider');
     const expiryDisplay = document.getElementById('expiry-display');
-    if (expirySlider && expiryDisplay) {
+    const expiryContainer = document.getElementById('expiry-slider-container');
+    if (expirySlider && expiryDisplay && expiryContainer) {
         expiryDisplay.textContent = expirySlider.value;
         expirySlider.addEventListener('input', () => {
             expiryDisplay.textContent = expirySlider.value;
         });
+        // Hide expiry slider when a private map is active (pins on private maps don't expire)
+        const updateExpiryVisibility = () => {
+            expiryContainer.style.display = activeMapId ? 'none' : 'block';
+        };
+        updateExpiryVisibility();
+        // Store original function to call after map changes
+        window._updateExpiryVisibility = updateExpiryVisibility;
     }
 }
 
@@ -439,6 +500,160 @@ async function openMyMapsModal() {
     if (!myMapsModal) return;
     myMapsModal.style.display = 'block';
     await loadUserMaps();
+}
+
+// Generate a short shareable link for a map (format: ?shareMap=mapId)
+function generateShareLink(mapId) {
+    const baseUrl = window.location.origin + window.location.pathname;
+    return `${baseUrl}?shareMap=${mapId}`;
+}
+
+// Show the share link input and copy button for a map
+function showShareLink(mapId) {
+    const shareLinkSection = document.getElementById('share-link-section');
+    const shareLinkInput = document.getElementById('share-link-input');
+    const copyButton = document.getElementById('copy-share-link-button');
+    
+    if (!shareLinkSection || !shareLinkInput) return;
+    
+    // Mark the map as shared in Firestore if not already shared
+    markMapAsShared(mapId);
+    
+    const shareLink = generateShareLink(mapId);
+    shareLinkInput.value = shareLink;
+    shareLinkSection.style.display = 'block';
+    
+    if (copyButton) {
+        copyButton.onclick = () => {
+            shareLinkInput.select();
+            document.execCommand('copy');
+            showToast('Share link copied to clipboard!');
+        };
+    }
+}
+
+// Mark a map as shared (isShared=true) so logged-out users can access it
+async function markMapAsShared(mapId) {
+    try {
+        console.log('markMapAsShared: attempting to mark', mapId, 'as shared, currentUserId:', currentUserId);
+        const mapRef = doc(db, 'userMaps', mapId);
+        await updateDoc(mapRef, { isShared: true });
+        console.log('Map marked as shared:', mapId);
+    } catch (error) {
+        console.error('Error marking map as shared:', error);
+        console.error('Error code:', error.code);
+        if (error.code === 'permission-denied') {
+            console.warn('Permission denied when marking map as shared - user may not be owner or not signed in');
+        }
+    }
+}
+
+// Load a shared map by ID
+async function loadSharedMap(mapId) {
+    try {
+        console.log('loadSharedMap:', mapId, 'currentUserId:', currentUserId);
+        // Fetch the map metadata
+        const mapRef = doc(db, 'userMaps', mapId);
+        const mapSnap = await getDoc(mapRef);
+        
+        console.log('Shared map document exists:', mapSnap.exists());
+        if (mapSnap.exists()) {
+            console.log('Shared map data:', mapSnap.data());
+        }
+        
+        if (!mapSnap.exists()) {
+            showToast('Shared map not found.');
+            return;
+        }
+        
+        const mapData = mapSnap.data();
+        
+        // Mark as viewing a shared map and simplify UI
+        isViewingSharedMap = true;
+        updateSharedMapUI();
+        
+        // Set active map and load pins
+        setActiveMap(mapId, mapData.name || 'Shared Map');
+        
+        // After a short delay, fit map to all pins
+        setTimeout(() => {
+            fitMapToAllPins();
+        }, 500);
+    } catch (error) {
+        console.error('Error loading shared map:', error);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        if (error.code === 'permission-denied') {
+            showToast('Permission denied. This shared map is not accessible.');
+        } else {
+            showToast('Unable to load shared map. Please check the link.');
+        }
+    }
+}
+
+// Fit map view to show all pins with some padding
+function fitMapToAllPins() {
+    if (!map || !window._pinsCache || window._pinsCache.length === 0) {
+        console.log('No pins to fit map to');
+        return;
+    }
+    
+    try {
+        // Create bounds from all pins
+        const bounds = window.L.latLngBounds([]);
+        let hasPins = false;
+        
+        window._pinsCache.forEach(({ data }) => {
+            if (data && data.lat && data.lng) {
+                bounds.extend([data.lat, data.lng]);
+                hasPins = true;
+            }
+        });
+        
+        if (hasPins) {
+            console.log('Fitting map to pins bounds:', bounds);
+            // Fit the map to the bounds with padding
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
+        }
+    } catch (error) {
+        console.warn('Error fitting map to pins:', error);
+    }
+}
+
+// Update UI to simplify interface for shared map viewing
+function updateSharedMapUI() {
+    const sharedMapHeader = document.getElementById('shared-map-header');
+    const searchContainer = document.getElementById('search-container');
+    const myMapsButton = document.getElementById('my-maps-button');
+    const authButton = document.getElementById('auth-button');
+    const howToButton = document.getElementById('how-to-use-button');
+    const aboutButton = document.getElementById('about-button');
+    
+    if (isViewingSharedMap) {
+        // Show shared map header
+        if (sharedMapHeader) sharedMapHeader.style.display = 'block';
+        
+        // Hide search bar
+        if (searchContainer) searchContainer.style.display = 'none';
+        
+        // Hide user-specific buttons
+        if (myMapsButton) myMapsButton.style.display = 'none';
+        if (authButton) authButton.style.display = 'none';
+        if (howToButton) howToButton.style.display = 'none';
+        if (aboutButton) aboutButton.style.display = 'none';
+    } else {
+        // Hide shared map header
+        if (sharedMapHeader) sharedMapHeader.style.display = 'none';
+        
+        // Show search bar
+        if (searchContainer) searchContainer.style.display = 'block';
+        
+        // Show user-specific buttons
+        if (myMapsButton) myMapsButton.style.display = 'inline-block';
+        if (authButton) authButton.style.display = 'inline-block';
+        if (howToButton) howToButton.style.display = 'inline-block';
+        if (aboutButton) aboutButton.style.display = 'inline-block';
+    }
 }
 
 async function loadUserMaps() {
@@ -518,7 +733,21 @@ async function loadUserMaps() {
                     await deleteUserMap(m.id, m.data.name);
                 });
 
+                const shareBtn = document.createElement('button');
+                shareBtn.textContent = 'Share';
+                shareBtn.style.background = '#34C759';
+                shareBtn.style.color = 'white';
+                shareBtn.style.border = 'none';
+                shareBtn.style.padding = '4px 8px';
+                shareBtn.style.borderRadius = '4px';
+                shareBtn.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    ev.preventDefault();
+                    showShareLink(m.id);
+                });
+
                 actions.appendChild(selectIndicator);
+                actions.appendChild(shareBtn);
                 actions.appendChild(delBtn);
 
                 li.appendChild(nameSpan);
@@ -566,6 +795,8 @@ function deactivateActiveMap() {
     if (myMapsModal && myMapsModal.style.display === 'block') loadUserMaps().catch(() => {});
     // reload pins so we return to the public feed
     try { loadPins(); } catch (e) { console.warn('Failed to reload pins after deactivation:', e); }
+    // Show expiry slider again since we're back to public
+    try { if (window._updateExpiryVisibility) window._updateExpiryVisibility(); } catch (e) {}
 }
 
 async function createUserMap() {
@@ -638,6 +869,8 @@ function setActiveMap(mapId, mapName) {
     updateDeactivateButtonVisibility();
     // Re-load pins to reflect the selected map (unsubscribe/resubscribe)
     try { loadPins(); } catch (e) { console.warn('Failed to reload pins after setActiveMap:', e); }
+    // Hide/show expiry slider based on whether we're on a private map
+    try { if (window._updateExpiryVisibility) window._updateExpiryVisibility(); } catch (e) {}
 }
 
 // small helper: return a divIcon for a pin colored with the provided color
@@ -957,6 +1190,14 @@ async function toggleHeart(pinId, currentCount, isHearted) {
             console.log(`Heart added for pin ${pinId} by user ${currentUserId}`);
         }
 
+        // Update the cached heartCount in the pin document for faster future loads
+        try {
+            const pinRef = doc(db, 'pins', pinId);
+            await updateDoc(pinRef, { heartCount: newHeartCount });
+        } catch (error) {
+            console.warn('Could not update heartCount cache:', error);
+        }
+
         // Update the open popup's heart button and count
         // Update UI elements specifically by selector to avoid collisions with dislike buttons
         const heartButton = document.querySelector(`.heart-button[data-pin-id="${pinId}"]`);
@@ -1011,6 +1252,14 @@ async function toggleDislike(pinId, currentCount, isDisliked) {
             console.log(`Dislike added for pin ${pinId} by user ${currentUserId}`);
         }
 
+        // Update the cached dislikeCount in the pin document for faster future loads
+        try {
+            const pinRef = doc(db, 'pins', pinId);
+            await updateDoc(pinRef, { dislikeCount: newDislikeCount });
+        } catch (error) {
+            console.warn('Could not update dislikeCount cache:', error);
+        }
+
         // Update UI
         const dislikeButton = document.querySelector(`.dislike-button[data-pin-id="${pinId}"]`);
         if (dislikeButton) {
@@ -1055,8 +1304,16 @@ async function savePin() {
 
     try {
         // Read expiry days from the modal slider (default to 7 days)
-        const expiryDays = parseInt(document.getElementById('expiry-slider')?.value || '7', 10);
-        const expiresAt = new Date(Date.now() + (expiryDays * 24 * 60 * 60 * 1000));
+        // If on a private map, pins don't expire (set to far future or null)
+        let expiresAt = null;
+        if (activeMapId) {
+            // Private map: pins don't expire, set to year 2999
+            expiresAt = new Date('2999-12-31');
+        } else {
+            // Public map: use slider value
+            const expiryDays = parseInt(document.getElementById('expiry-slider')?.value || '7', 10);
+            expiresAt = new Date(Date.now() + (expiryDays * 24 * 60 * 60 * 1000));
+        }
 
         const pinRef = await addDoc(collection(db, 'pins'), {
             lat: selectedLatLng.lat,
@@ -1068,7 +1325,10 @@ async function savePin() {
             expiresAt: expiresAt,
             createdById: currentUserId || null,
             createdByFirstName: currentUserFirstName || null,
-            color: selectedPinColor || '#008080'
+            color: selectedPinColor || '#008080',
+            // Initialize cached reaction counts for fast loading
+            heartCount: 0,
+            dislikeCount: 0
         });
         console.log('Pin saved with ID:', pinRef.id);
         pinModal.style.display = 'none';
@@ -1361,37 +1621,26 @@ function loadPins() {
                         // ignore parse errors and continue
                     }
 
-                    // Fetch both hearts and dislikes counts and whether current user has acted
-                    const heartsPromise = getDocs(collection(db, 'pins', pinId, 'hearts'))
-                    .then((heartsSnapshot) => ({
-                        heartCount: heartsSnapshot.size,
-                        isHearted: heartsSnapshot.docs.some(d => d.id === currentUserId)
-                    }))
-                    .catch((error) => {
-                        console.error('Error fetching hearts for pin', pinId, ':', error);
-                        return { heartCount: 0, isHearted: false };
-                    });
+                    // Use cached counts from the pin document (much faster than fetching subcollections)
+                    // Falls back to 0 if not cached yet
+                    const heartCount = data.heartCount || 0;
+                    const dislikeCount = data.dislikeCount || 0;
+                    
+                    // Determine if current user has reacted (only if signed in and have a userId)
+                    // For now, use a simpler approach: check cached boolean or fetch lazily later
+                    const isHearted = data.userHearts?.includes(currentUserId) || false;
+                    const isDisliked = data.userDislikes?.includes(currentUserId) || false;
 
-                const dislikesPromise = getDocs(collection(db, 'pins', pinId, 'dislikes'))
-                    .then((dislikesSnapshot) => ({
-                        dislikeCount: dislikesSnapshot.size,
-                        isDisliked: dislikesSnapshot.docs.some(d => d.id === currentUserId)
-                    }))
-                    .catch((error) => {
-                        console.error('Error fetching dislikes for pin', pinId, ':', error);
-                        return { dislikeCount: 0, isDisliked: false };
-                    });
-
-                promises.push(
-                    Promise.all([heartsPromise, dislikesPromise]).then(([h, d]) => ({
-                        pinId,
-                        data,
-                        heartCount: h.heartCount,
-                        isHearted: h.isHearted,
-                        dislikeCount: d.dislikeCount,
-                        isDisliked: d.isDisliked
-                    }))
-                );
+                    promises.push(
+                        Promise.resolve({
+                            pinId,
+                            data,
+                            heartCount,
+                            isHearted,
+                            dislikeCount,
+                            isDisliked
+                        })
+                    );
             });
 
             try {
