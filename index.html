@@ -122,6 +122,21 @@
             </div>
         </div>
 
+    <!-- First-Visit Tutorial Modal -->
+    <div id="tutorial-modal" class="modal">
+        <div class="modal-content tutorial-content">
+            <span class="close close-tutorial">&times;</span>
+            <h2>Welcome to Community Pins!</h2>
+            <div id="tutorial-steps"></div>
+            <div style="margin-top: 20px; text-align: center;">
+                <button id="tutorial-prev" style="margin-right: 10px;">← Previous</button>
+                <span id="tutorial-counter" style="margin: 0 10px; font-size: 14px; color: #666;"></span>
+                <button id="tutorial-next">Next →</button>
+            </div>
+            <button id="tutorial-close-btn" style="width: 100%; margin-top: 15px;">Got it!</button>
+        </div>
+    </div>
+
     <!-- Load Leaflet (non-module) before Firebase and script.js -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <!-- Firebase Modular Imports -->
