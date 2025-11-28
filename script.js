@@ -1518,7 +1518,7 @@ function loadPins() {
                 // Compute expiry display
                 let expiryHtml = '';
                 try {
-                    if (data && data.expiresAt) {
+                    if (!activeMapId && data && data.expiresAt) {
                         const exp = (typeof data.expiresAt.toDate === 'function') ? data.expiresAt.toDate() : new Date(data.expiresAt);
                         const now = new Date();
                         const msPerDay = 24 * 60 * 60 * 1000;
@@ -1658,7 +1658,7 @@ function loadPins() {
                 // Compute expiry display for reported pins as well
                 let expiryHtmlReported = '';
                 try {
-                    if (data && data.expiresAt) {
+                    if (!activeMapId && data && data.expiresAt) {
                         const exp = (typeof data.expiresAt.toDate === 'function') ? data.expiresAt.toDate() : new Date(data.expiresAt);
                         const now = new Date();
                         const msPerDay = 24 * 60 * 60 * 1000;
