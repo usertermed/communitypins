@@ -590,15 +590,9 @@ function renderTutorialStep() {
     // Update button states
     if (prevBtn) prevBtn.disabled = currentTutorialStep === 0;
     if (nextBtn) nextBtn.disabled = currentTutorialStep === TUTORIAL_STEPS.length - 1;
-const stepDiv = document.createElement('div');
-stepDiv.className = 'tutorial-step active';
-const titleEl = document.createElement('h3');
-titleEl.textContent = step.title;
-const descEl = document.createElement('p');
-descEl.textContent = step.description;
-stepDiv.appendChild(titleEl);
-stepDiv.appendChild(descEl);
-stepsContainer.appendChild(stepDiv);
+}
+
+function showTutorial() {
     // Don't show tutorial if viewing shared map
     if (isViewingSharedMap) return;
     
