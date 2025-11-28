@@ -49,6 +49,42 @@ let dislikesUnsubscribe = null;
 let dislikesPollHandle = null;
 let currentLocationStatus = ''; // base location/status text (search/center messages)
 
+// Tutorial modal tracking
+let tutorialModal = null;
+let currentTutorialStep = 0;
+
+// Tutorial steps definition
+const TUTORIAL_STEPS = [
+    {
+        title: "Welcome to Community Pins!",
+        description: "Join your community in sharing and discovering location-based pins on the map. Let's get started!"
+    },
+    {
+        title: "Sign In to Get Started",
+        description: "Click 'Sign in' to authenticate with Google or GitHub. You'll need to be signed in to add pins and participate."
+    },
+    {
+        title: "Place a Pin",
+        description: "Click anywhere on the map to add a pin at that location. You'll be able to add a note and choose a color."
+    },
+    {
+        title: "Add Details",
+        description: "Write a message (up to 100 characters) for your pin and choose from our palette of 8 colors to personalize it."
+    },
+    {
+        title: "Like & Report",
+        description: "Click the heart icon to like pins you enjoy. If you find inappropriate content, use the Report button to flag it for review."
+    },
+    {
+        title: "Explore & Share",
+        description: "Use Search to find specific locations and explore pins from your community. Share the map with friends!"
+    },
+    {
+        title: "Create Your Own Maps",
+        description: "Click 'My Maps' to create and manage custom maps. Invite friends to collaborate on community-specific pin boards!"
+    }
+];
+
 function setLocationStatus(text) {
     currentLocationStatus = text || '';
     updateLocationStatusDisplay();
@@ -155,6 +191,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadPins();
     // Refresh displayed status to include selected map if any
     updateLocationStatusDisplay();
+    // Show tutorial on first visit (unless viewing shared map)
+    showTutorial();
 });
 
 // Update auth button UI text
@@ -325,10 +363,17 @@ function initModals() {
     document.getElementById('cancel-pin').onclick = () => { pinModal.style.display = 'none'; };
     document.getElementById('save-pin').onclick = savePin;
 
-    // How to Use modal
+    // How to Use modal (now shows tutorial)
     document.querySelector('#how-to-use-modal .close').onclick = () => { howToUseModal.style.display = 'none'; };
     document.querySelector('.close-how-to-use').onclick = () => { howToUseModal.style.display = 'none'; };
-    document.getElementById('how-to-use-button').onclick = () => { howToUseModal.style.display = 'block'; };
+    document.getElementById('how-to-use-button').onclick = () => { 
+        // Reset tutorial to first step and show it
+        currentTutorialStep = 0;
+        if (tutorialModal) {
+            tutorialModal.style.display = 'block';
+            renderTutorialStep();
+        }
+    };
 
     // About modal
     document.querySelector('#about-modal .close').onclick = () => { aboutModal.style.display = 'none'; };
@@ -443,6 +488,32 @@ function initModals() {
     }
     // Ensure deactivate button reflects current state on init
     try { updateDeactivateButtonVisibility(); } catch (e) {}
+
+    // Tutorial modal
+    tutorialModal = document.getElementById('tutorial-modal');
+    if (tutorialModal) {
+        const closeTutorialBtn = document.querySelector('.close-tutorial');
+        if (closeTutorialBtn) closeTutorialBtn.onclick = () => { closeTutorial(); };
+        
+        document.getElementById('tutorial-prev').addEventListener('click', () => {
+            if (currentTutorialStep > 0) {
+                currentTutorialStep--;
+                renderTutorialStep();
+            }
+        });
+        
+        document.getElementById('tutorial-next').addEventListener('click', () => {
+            if (currentTutorialStep < TUTORIAL_STEPS.length - 1) {
+                currentTutorialStep++;
+                renderTutorialStep();
+            }
+        });
+        
+        document.getElementById('tutorial-close-btn').addEventListener('click', () => {
+            closeTutorial();
+        });
+    }
+
     // Initialize color palette buttons
     const paletteEl = document.getElementById('color-palette');
     const colors = ['#008080', '#FF3B30', '#FF9500', '#FFCC00', '#34C759', '#007AFF', '#5856D6', '#8E8E93'];
@@ -490,6 +561,69 @@ function updatePaletteSelectionUI() {
         if (s.dataset.color === selectedPinColor) s.classList.add('selected');
         else s.classList.remove('selected');
     });
+}
+
+// Tutorial-related functions
+function renderTutorialStep() {
+    const stepsContainer = document.getElementById('tutorial-steps');
+    const counterSpan = document.getElementById('tutorial-counter');
+    const prevBtn = document.getElementById('tutorial-prev');
+    const nextBtn = document.getElementById('tutorial-next');
+    
+    if (!stepsContainer) return;
+    
+    // Clear previous steps
+    stepsContainer.innerHTML = '';
+    
+    // Render current step
+    const step = TUTORIAL_STEPS[currentTutorialStep];
+    const stepDiv = document.createElement('div');
+    stepDiv.className = 'tutorial-step active';
+    stepDiv.innerHTML = `<h3>${step.title}</h3><p>${step.description}</p>`;
+    stepsContainer.appendChild(stepDiv);
+    
+    // Update counter
+    if (counterSpan) {
+        counterSpan.textContent = `${currentTutorialStep + 1} of ${TUTORIAL_STEPS.length}`;
+    }
+    
+    // Update button states
+    if (prevBtn) prevBtn.disabled = currentTutorialStep === 0;
+    if (nextBtn) nextBtn.disabled = currentTutorialStep === TUTORIAL_STEPS.length - 1;
+const stepDiv = document.createElement('div');
+stepDiv.className = 'tutorial-step active';
+const titleEl = document.createElement('h3');
+titleEl.textContent = step.title;
+const descEl = document.createElement('p');
+descEl.textContent = step.description;
+stepDiv.appendChild(titleEl);
+stepDiv.appendChild(descEl);
+stepsContainer.appendChild(stepDiv);
+    // Don't show tutorial if viewing shared map
+    if (isViewingSharedMap) return;
+    
+    // Check if user has already seen the tutorial
+    const hasSeen = localStorage.getItem('communityPins_tutorial_seen');
+    if (hasSeen === 'true') return;
+    
+    // Initialize tutorial state
+    currentTutorialStep = 0;
+    
+    // Show tutorial modal
+    if (tutorialModal) {
+        tutorialModal.style.display = 'block';
+        renderTutorialStep();
+    }
+}
+
+function closeTutorial() {
+    // Mark tutorial as seen
+    localStorage.setItem('communityPins_tutorial_seen', 'true');
+    
+    // Close modal
+    if (tutorialModal) {
+        tutorialModal.style.display = 'none';
+    }
 }
 
 // --- My Maps: load/create/delete/select user maps ---
